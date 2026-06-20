@@ -165,6 +165,13 @@ class CAMFile:
             for i in range(0, numUnits):
                 newline.append("")
 
+            if re.search(r"\(", line):
+                for i in range(0, numUnits):
+                    newline[i] = line
+                for i in range(0, numUnits):
+                    self._output[i].append(newline[i])
+                continue
+
             if direction == "HORIZONTAL":
                 match = re.search(r"(.*)X(-*[0-9]+[.]*[0-9]*)(.*\n*)", line)
             else:
@@ -278,17 +285,17 @@ class CAMFile:
                 # debug_print(line + " ==> " + match + "++++" +  match[1] + "x" + match[2] + match[3] + cline)
                 oldi = float(match2[2])
                 newi = -1 * oldi
-                newline = f"{match2[1]}I{newi}{match2[3]}"
+                newline = f"{match2[1]}I{newi:.4f}{match2[3]}"
 
                 # we also need to change from G2 to G3 and vice versa
                 match3 = re.search(r"(G[23])(.*\n*)", newline)
-                # debug_print("3: "  match3  + "|"  + match3[1]  + "|"  + match3[2])
-                if not match3:
-                    debug_print("ERROR!!!!!")
-                if match3[1] == "G3":
-                    newline = f"G2{match3[2]}"
+                if match3:
+                    if match3[1] == "G3":
+                        newline = f"G2{match3[2]}"
+                    else:
+                        newline = f"G3{match3[2]}"
                 else:
-                    newline = f"G3{match3[2]}"
+                    raise ValueError(f"Arc has I but no G2/G3 on same line in {self.name}: {newline!r}")
                 #  debug_print("oldI:"  + str(oldi)  + " newI:"  + str(newi)  + " newline: "  + newline)
         else:
             # vertical mirroring = serach for Y
@@ -320,13 +327,12 @@ class CAMFile:
                 # debug_print(line + " ==> " + match + "++++" + match[1] + "J" + match[2] + match[3] + cline)
                 oldj = float(match2[2])
                 newj = -1 * oldj
-                newline = f"{match2[1]}J{newj}{match2[3]}"
+                newline = f"{match2[1]}J{newj:.4f}{match2[3]}"
 
                 # we also need to change from G2 to G3 and vice versa
                 match3 = re.search(r"(G[23])(.*\n*)", newline)
-                # debug_print("3: " + match3 + "|" + match3[1] + "|" + match3[2])
                 if not match3:
-                    debug_print("ERROR!!!!!")
+                    raise ValueError(f"Arc has J but no G2/G3 on same line in {self.name}: {newline!r}")
                 if match3[1] == "G3":
                     newline = f"G2{match3[2]}"
                 else:

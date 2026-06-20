@@ -441,6 +441,11 @@ def write_output_files():
                 dpg.destroy_context()
             output_file_ind_unit.append(newfile)
 
+        output_file_1toN = []
+        for n in range(2, units_to_produce + 1):
+            fn = base_output_dir + "/1to" + str(n) + "/" + out["name"]
+            output_file_1toN.append(open(fn, "w"))
+
         lastf = None
         for f in by_step[stepnum]:
             lastf = f
@@ -516,8 +521,19 @@ def write_output_files():
                                       suppress_end_code,
                                       cline, cline_delta, direction)
 
+            for idx, n in enumerate(range(2, units_to_produce + 1)):
+                n_units = 1 if numUnits == 1 else n
+                write_output_file(f, f.name, output_file_1toN[idx],
+                                  1, n_units,
+                                  mirror_active,
+                                  current_tool_num,
+                                  suppress_end_code,
+                                  cline, cline_delta, direction)
+
         for unit in range(0, units_to_produce):
             output_file_ind_unit[unit].close()
+        for n_file in output_file_1toN:
+            n_file.close()
 
 
     if debug_wof:
