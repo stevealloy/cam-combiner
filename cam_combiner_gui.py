@@ -560,16 +560,14 @@ def write_output_files():
             fname = cfile.name
 
             ofname = base_output_dir + "/1to" + str(i) + "/IndFiles/" + fname
-            output_file = open(ofname, "w")
             if re.search("-NODUP", fname):
                 # no duplication, displacement, mirroring for this one.
                 if debug_wof:
                     print("     NODUP case. This was already written above")
                 continue
-
-            else:
-                if debug_wof:
-                    print("     Normal file, outputting for units [1:", i, "] to ", ofname)
+            if debug_wof:
+                print("     Normal file, outputting for units [1:", i, "] to ", ofname)
+            with open(ofname, "w") as output_file:
                 write_output_file(cfile, fname, output_file, 1, i, lefty, -1, True, cline, cline_delta, direction)
 
 
@@ -713,8 +711,7 @@ def write_output_files():
                         debug_print("WTF. can't find T2 CAM File structure! Aborting.")
                         dpg.destroy_context()
 
-                    if 0 and (    CAMFiles[myfilenum].get_selected() or
-                            CAMFiles[t2filenum].get_selected()):
+                    if _is_file_enabled(t2file):
                         have_error = True
                         t.set_error(True)
                         t2.set_error(True)
@@ -855,6 +852,8 @@ def set_cfg(path):
             continue
         name = p.get("name")
         if not name:
+            continue
+        if name in ("Lefty", "unit_1_only"):
             continue
         items = p.get("values", [])
         # normalize: dearpygui expects strings

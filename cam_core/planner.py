@@ -161,7 +161,7 @@ def _scan_files_int(base_dir: str, include_ext: Tuple[str,...]=(".nc",)):
                             t.add_file(entry)
                         else:
                             # t # match, but descp fail. ERROR!
-                            t.set_error("file " + entry.name + " reused tool #" + t.get_tool_num() + "new descr: "+tool.get_desc())
+                            t.set_error("file " + entry.name + " reused tool #" + str(t.get_tool_num()) + " new descr: "+tool.get_desc())
                             t.add_file(entry)
                         break
                 if not got_one:
@@ -213,9 +213,9 @@ def plan(cfg: Dict[str, Any],
 
     selected_by_step: Dict[str, List[CAMFile]] = {}
     sorted_selected_by_step: Dict[str, List[CAMFile]] = {}
-    featbool: Dict[CAMFile, bool] = {}
-    firstbool: Dict[CAMFile, bool] = {}
-    endbool: Dict[CAMFile, bool] = {}
+    featbool: Dict[CAMFile, List[bool]] = {}
+    firstbool: Dict[CAMFile, List[bool]] = {}
+    endbool: Dict[CAMFile, List[bool]] = {}
     req_missing = []
 
     params = {}
@@ -268,9 +268,9 @@ def plan(cfg: Dict[str, Any],
                     fstep = f.get_step()
 
                     if fstep == "FRONT":
-                        fstep = cfg.get("FRONT-STEP")
+                        fstep = cfg.get("FRONT-STEP") or "00"
                     if fstep == "BACK":
-                        fstep = cfg.get("BACK-STEP")
+                        fstep = cfg.get("BACK-STEP") or "00"
                     selected_by_step.setdefault(fstep, []).append(f)
 
     unsortedfeatures = features_enabled
@@ -287,9 +287,9 @@ def plan(cfg: Dict[str, Any],
         for f in sortedfiles:
             raw_step = str(f.get_step())
             if raw_step == "FRONT":
-                raw_step = cfg.get("FRONT-STEP")
+                raw_step = cfg.get("FRONT-STEP") or "00"
             if raw_step == "BACK":
-                raw_step = cfg.get("BACK-STEP")
+                raw_step = cfg.get("BACK-STEP") or "00"
             fstep = str(f'{raw_step:0>2}')
             selected_by_step.setdefault(fstep, []).append(f)
 
@@ -320,9 +320,9 @@ def plan(cfg: Dict[str, Any],
         if step in selected_by_step:
             #***** FEAT ****** FIRST ******* !END
             for f in selected_by_step.get(step, []):
-                fet = featbool.get(f)[0]
-                fst = firstbool.get(f)[0]
-                eb = endbool.get(f)[0]
+                fet = (featbool.get(f) or [False])[0]
+                fst = (firstbool.get(f) or [False])[0]
+                eb = (endbool.get(f) or [False])[0]
                 #print("step:"+step+" file:"+f.name+" feat?"+str(fet)+" fst?"+str(fst)+" end?"+str(eb))
                 if fet and fst and not eb:
                     # output it
@@ -330,9 +330,9 @@ def plan(cfg: Dict[str, Any],
 
             # ***** BASE ****** FIRST ******* !END
             for f in selected_by_step.get(step, []):
-                fet = featbool.get(f)[0]
-                fst = firstbool.get(f)[0]
-                eb = endbool.get(f)[0]
+                fet = (featbool.get(f) or [False])[0]
+                fst = (firstbool.get(f) or [False])[0]
+                eb = (endbool.get(f) or [False])[0]
                 if not fet and fst and not eb:
                     #output it
                     sorted_selected_by_step.setdefault(step, []).append(f)
@@ -340,9 +340,9 @@ def plan(cfg: Dict[str, Any],
 
             #***** FEAT ****** !FIRST ******* !END (Normal feature files)
             for f in selected_by_step.get(step, []):
-                fet = featbool.get(f)[0]
-                fst = firstbool.get(f)[0]
-                eb = endbool.get(f)[0]
+                fet = (featbool.get(f) or [False])[0]
+                fst = (firstbool.get(f) or [False])[0]
+                eb = (endbool.get(f) or [False])[0]
                 if fet and not fst and not eb:
                     #output it
                     sorted_selected_by_step.setdefault(step, []).append(f)
@@ -350,9 +350,9 @@ def plan(cfg: Dict[str, Any],
 
             #***** BASE ****** !FIRST ******* !END (Normal base files)
             for f in selected_by_step.get(step, []):
-                fet = featbool.get(f)[0]
-                fst = firstbool.get(f)[0]
-                eb = endbool.get(f)[0]
+                fet = (featbool.get(f) or [False])[0]
+                fst = (firstbool.get(f) or [False])[0]
+                eb = (endbool.get(f) or [False])[0]
                 if not fet and not fst and not eb:
                     #output it
                     sorted_selected_by_step.setdefault(step, []).append(f)
@@ -360,9 +360,9 @@ def plan(cfg: Dict[str, Any],
 
             #***** FEAT ****** !FIRST ******* END (-end feature files)
             for f in selected_by_step.get(step, []):
-                fet = featbool.get(f)[0]
-                fst = firstbool.get(f)[0]
-                eb = endbool.get(f)[0]
+                fet = (featbool.get(f) or [False])[0]
+                fst = (firstbool.get(f) or [False])[0]
+                eb = (endbool.get(f) or [False])[0]
                 if fet and not fst and eb:
                     #output it
                     sorted_selected_by_step.setdefault(step, []).append(f)
@@ -370,9 +370,9 @@ def plan(cfg: Dict[str, Any],
 
             #***** BASE ****** !FIRST ******* END (-end base files)
             for f in selected_by_step.get(step, []):
-                fet = featbool.get(f)[0]
-                fst = firstbool.get(f)[0]
-                eb = endbool.get(f)[0]
+                fet = (featbool.get(f) or [False])[0]
+                fst = (firstbool.get(f) or [False])[0]
+                eb = (endbool.get(f) or [False])[0]
                 if not fet and not fst and eb:
                     #output it
                     sorted_selected_by_step.setdefault(step, []).append(f)

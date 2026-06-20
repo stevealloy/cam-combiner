@@ -49,29 +49,41 @@ def eval_condition(expr: str, params: Dict[str, Any]) -> bool:
         return out
     seq = reduce_nots(values)
     def reduce_and(seq):
-        out = []
-        i = 0
-        while i < len(seq):
-            if i+2 < len(seq) and seq[i+1] == "&&":
-                a = (seq[i] == "True")
-                b = (seq[i+2] == "True")
-                out.append("True" if (a and b) else "False")
-                i += 3
-            else:
-                out.append(seq[i]); i += 1
-        return out
+        while True:
+            out = []
+            i = 0
+            changed = False
+            while i < len(seq):
+                if i + 2 < len(seq) and seq[i + 1] == "&&":
+                    a = (seq[i] == "True")
+                    b = (seq[i + 2] == "True")
+                    out.append("True" if (a and b) else "False")
+                    i += 3
+                    changed = True
+                else:
+                    out.append(seq[i]); i += 1
+            seq = out
+            if not changed:
+                break
+        return seq
     seq = reduce_and(seq)
     def reduce_or(seq):
-        out = []
-        i = 0
-        while i < len(seq):
-            if i+2 < len(seq) and seq[i+1] == "||":
-                a = (seq[i] == "True")
-                b = (seq[i+2] == "True")
-                out.append("True" if (a or b) else "False")
-                i += 3
-            else:
-                out.append(seq[i]); i += 1
-        return out
+        while True:
+            out = []
+            i = 0
+            changed = False
+            while i < len(seq):
+                if i + 2 < len(seq) and seq[i + 1] == "||":
+                    a = (seq[i] == "True")
+                    b = (seq[i + 2] == "True")
+                    out.append("True" if (a or b) else "False")
+                    i += 3
+                    changed = True
+                else:
+                    out.append(seq[i]); i += 1
+            seq = out
+            if not changed:
+                break
+        return seq
     seq = reduce_or(seq)
     return seq[-1] == "True" if seq else False

@@ -208,7 +208,7 @@ class CAMFile:
                         "[" + str(start_unit) + ":" + str(end_unit) + "]" + direction +
                         suppress_end_code)
 
-        for i in range(start_unit,  num_units + 1):
+        for i in range(start_unit, end_unit + 1):
             if debug_get_output:
                 debug_print(self.name  + ": get output :" + "dumping unit " + str(i))
 

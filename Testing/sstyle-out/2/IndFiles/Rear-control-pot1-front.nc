@@ -1,5 +1,0 @@
-( BEGIN FILE Rear-control-pot1-front.ncTNUM: -1 )
-( Lefty:False Nunits:1 )
-( cline: 9.733 delta:15.5 )
-( start_unit: 2 num_units: 1)
-( END FILE Rear-control-pot1-front.nc )

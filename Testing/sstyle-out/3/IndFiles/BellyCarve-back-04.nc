@@ -1,5 +1,0 @@
-( BEGIN FILE BellyCarve-back-04.ncTNUM: -1 )
-( Lefty:False Nunits:1 )
-( cline: 9.733 delta:15.5 )
-( start_unit: 3 num_units: 1)
-( END FILE BellyCarve-back-04.nc )

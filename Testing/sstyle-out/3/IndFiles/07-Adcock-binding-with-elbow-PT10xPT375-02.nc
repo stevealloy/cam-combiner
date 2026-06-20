@@ -1,5 +1,0 @@
-( BEGIN FILE 07-Adcock-binding-with-elbow-PT10xPT375-02.ncTNUM: -1 )
-( Lefty:False Nunits:1 )
-( cline: 9.733 delta:15.5 )
-( start_unit: 3 num_units: 1)
-( END FILE 07-Adcock-binding-with-elbow-PT10xPT375-02.nc )
