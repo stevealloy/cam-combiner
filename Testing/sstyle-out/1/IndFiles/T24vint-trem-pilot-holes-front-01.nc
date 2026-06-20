@@ -1,0 +1,50 @@
+( BEGIN FILE T24vint-trem-pilot-holes-front-01.ncTNUM: -1 )
+( Lefty:False Nunits:1 )
+( cline: 9.733 delta:15.5 )
+( start_unit: 1 num_units: 1)
+( MOP:  vint-trem-pilot-holes-front-01 )
+( FILE: G:\Shared drives\AlloyProjectFiles\Customer CAD files\Alloy-Standard-Builds-CAM\s-in\True24 Specific\vint-trem-pilot-holes-front-01.nc)
+G90
+(  BEGIN TOOL LIST )
+(  TOOL 19 - Downcut 1pt5mm PT0590 - DESC: 0.0590 DIA, 2 FLUTE,  CARBIDE MAT )
+(  ENDOF TOOL LIST )
+( vint-trem-pilot-holes-front-01)
+T19
+S12000
+M3
+G0 Z4.0000
+G0 X10.8417 Y-15.7317 
+G0 Z1.8500
+G81 X10.8417 Y-15.7317 Z1.2500 R1.8500 F20.0
+G80
+G0 Z2.0000
+G0 X10.3977 Y-15.7317 
+G0 Z1.8500
+G81 X10.3977 Y-15.7317 Z1.2500 R1.8500 F20.0
+G80
+G0 Z2.0000
+G0 X9.9537 Y-15.7317 
+G0 Z1.8500
+G81 X9.9537 Y-15.7317 Z1.2500 R1.8500 F20.0
+G80
+G0 Z2.0000
+G0 X9.5097 Y-15.7317 
+G0 Z1.8500
+G81 X9.5097 Y-15.7317 Z1.2500 R1.8500 F20.0
+G80
+G0 Z2.0000
+G0 X9.0657 Y-15.7317 
+G0 Z1.8500
+G81 X9.0657 Y-15.7317 Z1.2500 R1.8500 F20.0
+G80
+G0 Z2.0000
+G0 X8.6230 Y-15.7317 
+G0 Z1.8500
+G81 X8.6230 Y-15.7317 Z1.2500 R1.8500 F20.0
+G80
+G0 Z4.0000
+G0 X8.6230 Y-15.7317 
+M5
+G53 Z
+G0 X2Y0
+( END FILE T24vint-trem-pilot-holes-front-01.nc )

@@ -1,0 +1,193 @@
+{
+    "MODEL":"FingerboardsFileBased",
+
+    // FIXTURE DEFINITION
+    "CLINE":-22.7994, // was 22.7982
+    "CLINE_DELTA":4,
+    "MAXUNITS":5,
+    "DIRECTION":"VERTICAL", // Dir of duplication: HORIZONTAL==x axis (bodies) or VERTICAL==y axis (fingerboards)
+
+    // Defaults
+    "LEFTY":"False",
+    "NUMUNITS":2,
+
+    "PARAMETERS": [
+        {
+            "name":"Scale",
+            "block":"Basic",
+            "values":["s21","s22", "s23", "s24", "s24PT5", "s24PT625", "s24PT75", "s25", "s25PT5","s26PT5", "s27", "s34"],
+            "wildcard":"AnyScale",
+            "default":"s21"
+        },
+        {
+            "name":"Radius",
+            "block":"Basic",
+            "values":["fFlat", "r7PT25","r9PT5", "r10", "r12", "r14", "r16", "r20", "r1016", "r1020", "r1216", "rNone", "r12Wolnick"],
+            "wildcard":"AnyRadius",
+            "default":"r7PT25"
+        },
+        {
+            "name":"FinalThickness",
+            "block":"Basic",
+            "values":["ftPT35", "ftPT30", "ftPT21"],
+            "wildcard":"AnyFinalThickness",
+            "default":"ftPT30"
+        },
+        {
+            "name":"NutSlot",
+            "block":"Basic",
+            "values": ["None", "Fender", "FenderShort", "Gibson", "Floyd", "ZeroFret"],
+            "wildcard":"AnyNutSlot",
+            "default":"Gibson"
+        },
+        {
+            "name":"NutDepth",
+            "block":"Basic",
+            "values": ["PT103", "PT092"],
+            "wildcard":"AnyNutDepth",
+            "default":"PT092"
+        },
+        {
+            "name":"TRWindow",
+            "block":"Basic",
+            "values": ["TRWinNone", "TRWin20th", "TRWin21st"],
+            "wildcard":"AnyTR",
+            "default":"TRWinNone"
+        },
+        {
+            "name":"NumFrets",
+            "block":"Frets",
+            "values": ["NFretsNone", "NFrets19","NFretsDulc","NFrets20","NFrets21","NFrets22","NFrets24","NFrets41"],
+            "wildcard":"AnyNumFrets",
+            "default":"NFrets19"
+        },
+        {
+            "name":"UseAggregateFrets",
+            "block":"Frets",
+            "values": ["True", "False"],
+            "wildcard":"",
+            "default":"False"
+        },
+        {
+            "name":"FretStepAlone",
+            "block":"Frets",
+            "values": ["Yes", "No"],
+            "wildcard":"",
+            "default":"Yes"
+        },
+        {
+            "name":"HiddenKerf",
+            "block":"Frets",
+            "values": ["HiddenKerf", "StandardKerf", "FretlessKerf","NoKerf"],
+            "wildcard":"AnyKerf",
+            "default":"HiddenKerf"
+        },
+        {
+            "name":"FretDepth",
+            "block":"Frets",
+            "values": ["StandardDepth", "JumboDepth"],
+            "wildcard":"AnyFretDepth",
+            "default":"StandardDepth"
+        },
+        {
+            "name":"HeelShape",
+            "block":"Shape",
+            "values": ["S", "T", "J", "Square", "T24Square", "T24SStyle", "T24TStyle", "Belltone", "NAA","Kite", "Moser", "Black35", "Songhurst", "McSwain", "MTone","Pinter6","Pinter12","Foley","SoulfireSF1","Wolnick","ADHD","r7PT25","Inglewood"],
+            "wildcard":"AnyHeelShape",
+            "default":"Inglewood"
+        },
+        {
+            "name":"NutWidth",
+            "block":"Shape",
+            "values":["nw38","nw41","nw42","nw43","nw45", "nw42PT22", "nw42PT8", "nw42PT875", "nw41PT74", "nw49PT022"],
+            "wildcard":"AnyNutWidth",
+            "default":"nw43"
+        },
+        {
+            "name":"Inlay",
+            "block":"Inlays",
+            "values": ["None", "Dot6mm","Dot6mmOffset", "Dot6mmDulc", "DotPT25", "Trapezoids", "SharkTooth", "DoubleDiamond", "Rectangles", "TriBlock", "Pinter", "NAA", "Kite", "Moser", "BC", "BAFurgeson", "Songhurst", "McSwainStars", "McSwainLightbolt","Foley","SoulfireSF1","RectanglesNoTwelveth","DoubleFingers","Fangs","InglewoodDiamonds", "InglewoodDiamondsDulc"],
+            "wildcard":"AnyInlay",
+            "default":"Dot6mm"
+        },
+        {
+            "name":"Customer",
+            "block":"Shape",
+            "values": ["Generic", "Pinter", "McSwain"],
+            "wildcard":"AnyCustomer",
+            "default":"Generic"
+        },
+        {
+            "name":"InlayDepth",
+            "block":"Inlays",
+            "values":["idPT04", "idPT06","idPT09","idPT081"],  // pt081 for mcswain
+            "wildcard":"AnyIDepth",
+            "default":"idPT09"
+        },
+        { 
+            // if true then use rough radius in 02- and generate 03- with final radius. Else use final radius in 02-
+            "name":"PauseAfterInlay",
+            "block":"Inlays",
+            "values": ["True", "False"],
+            "wildcard":"AnyPauseAfterInlay",
+            "default":"True"
+        },
+        {
+            "name":"SideDotDesign",
+            "block":"SideDots",
+            "values": ["sdNone", "sdDot"],
+            "wildcard":"AnySideDot",
+            "default":"sdDot"
+        },
+        {
+            "name":"SideDepth",
+            "block":"SideDots",
+            "values":["sddPT06","sddPT09"],
+            "wildcard":"AnySideDotDepth",
+            "default":"sddPT06"
+        }
+    ],
+
+    // dotD sideD inlay inlayD radius scale nwidth nutslot heel trwindow nfrets hiddenK UAF lefty
+    "INPUT-FILE-NAME-BASES": [
+            { "name":"01-backprep-<Scale>-<FinalThickness>",                            "required":"True", "condition":"None" },
+            { "name":"01-backprep-Pins-<Scale>-<FinalThickness>-<Customer>",            "required":"True", "condition":"None" },
+            //{ "name":"02-radius-<Radius>-<Scale>-rough",                              "required":"True", "condition":"PauseAfterInlay" },
+            { "name":"02-radius-<Radius>-<Scale>-final",                                "required":"True", "condition":"!PauseAfterInlay" },
+            { "name":"02-nutslot-<Scale>-<NutSlot>-<NutDepth>",                         "required":"True", "condition":"None" },
+            { "name":"02-TR-Window-<TRWindow>",                                         "required":"True", "condition":"None" },
+            { "name":"02-inlay-<Inlay>-<InlayDepth>-<Scale>",                           "required":"True", "condition":"None" },
+
+            { "name":"03-radius-<Radius>-<Scale>-final",                                "required":"True", "condition":"PauseAfterInlay" }, // may require duplication of 02-radius-xxx-final file: or may be different to e.g., cut down inlays before radiusing.
+
+            { "name":"03-frets-<Radius>-<Scale>-<NumFrets>-<FretDepth>-<HiddenKerf>",   "required":"True", "condition":"!FretStepAlone&&!UseAggregateFrets" },
+
+            { "name":"04-frets-<Radius>-<Scale>-<NumFrets>-<FretDepth>-<HiddenKerf>",   "required":"True", "condition":"FretStepAlone&&!UseAggregateFrets" },   // requires duplication of 03-frets-xxx file
+            { "name":"04-frets-<Radius>-<Scale>-<NumFrets>-<FretDepth>-<HiddenKerf>-aggregate", "required":"False", "condition":"FretStepAlone&&UseAggregateFrets" },
+
+            { "name":"05-profile-<Scale>-<NutWidth>-<NutSlot>-<HeelShape>-<NumFrets>",  "required":"True", "condition":"None" },
+
+            { "name":"06-side-dots-<SideDotDesign>-<SideDepth>-<Scale>-<Radius>",   "required":"False", "condition":"None" }
+    ],
+
+    "HasStartAndEnd":"True", // for front and back steps, this determines if the -start and -end are used to distinguish CAM that goes before Features from CAM that goes after Features are inserted
+    "FRONT-STEP":"02-",
+    "BACK-STEP":"08-",
+    "NUM-STEPS":10,
+
+    "OUTPUT-FILE-NAMES": [
+            "B00-binding-fretless-prep-back-up.nc",         // Outer Pins
+            "B01-binding-fretless-slotting1-front-up.nc",   // Slot / install #1
+            "B02-binding-fretless-slotting2-front-up.nc",   // Slot / install #2
+            "B03-binding-fretless-top-clean-front-up.nc",   // Face off any proud materials
+
+            "01-blank-prep-back-up.nc",
+            "02-front.nc", // right side of fixture, no profile
+            "03-front-final.nc", // right side of fixture
+            "04-frets.nc",
+            "05-profile.nc", // left side of fixture
+            "06-platform.nc"
+    ],
+
+    "unused":"foobar" // all prior lines need trailing comma
+}

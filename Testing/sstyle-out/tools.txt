@@ -1,0 +1,29 @@
+Model:S-style
+
+Lefty:False
+Nunits:3
+
+Cline: 9.733
+ClineDelta:15.5 
+Direction:HORIZONTAL
+
+Input Dir:G:\Shared drives\AlloyProjectFiles\Customer CAD files\Alloy-Standard-Builds-CAM\PycharmProjects\CC2\Testing\sstyle-in
+Output Dir:G:\Shared drives\AlloyProjectFiles\Customer CAD files\Alloy-Standard-Builds-CAM\PycharmProjects\CC2\Testing\sstyle-out
+Error	Tnum	Desc	FirstOccuranceFile
+	T#10	Surface 2PT500 - DES
+	T#20	Drill PT3937 10mm - 
+	T#30	Downcut PT750 - DESC
+	T#40	Downcut PT500 - DESC
+	T#50	Downcut PT375 - DESC
+	T#60	Downcut PT250 - DESC
+	T#70	Downcut PT125 - DESC
+	T#90	Drill PT1575 4mm - D
+	T#10	Drill PT3150 8mm - D
+	T#11	Downcut PT750 ROUGH 
+	T#12	Ball PT750 - DESC: 0
+	T#13	Straight PT750 - DES
+	T#14	Roundover PT500 - DE
+	T#15	Roundover PT125 Accu
+ERROR:		T#17	Drawer slotting mill
+	T#19	Downcut 1pt5mm PT059
+	T#20	Downcut 2mm - DESC: 

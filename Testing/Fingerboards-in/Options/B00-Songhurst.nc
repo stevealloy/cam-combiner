@@ -1,0 +1,25 @@
+( MOP:  B00-Songhurst )
+( FILE: G:\Shared drives\AlloyProjectFiles\Customer CAD files\Alloy-Standard-Builds-CAM\Fingerboards-in\Options\B00-Songhurst.nc)
+G90
+(  BEGIN TOOL LIST )
+(  TOOL 7 - Downcut PT125 - DESC: 0.1250 DIA, 2 FLUTE,  CARBIDE MAT )
+(  ENDOF TOOL LIST )
+( B00-Songhurst)
+T07
+S11000
+M3
+G0 Z4.0000
+G0 X46.9087 Y-22.7994 
+G0 Z0.5000
+G81 X46.9087 Y-22.7994 Z-0.0250 R0.5000 F60.0
+G80
+G0 Z0.6250
+G0 X26.9087 Y-22.7994 
+G0 Z0.5000
+G81 X26.9087 Y-22.7994 Z-0.0250 R0.5000 F60.0
+G80
+G0 Z4.0000
+G0 X26.9087 Y-22.7994 
+M5
+G53 Z
+X2Y0

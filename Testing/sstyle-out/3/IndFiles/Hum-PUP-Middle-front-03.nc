@@ -1,0 +1,5 @@
+( BEGIN FILE Hum-PUP-Middle-front-03.ncTNUM: -1 )
+( Lefty:False Nunits:1 )
+( cline: 9.733 delta:15.5 )
+( start_unit: 3 num_units: 1)
+( END FILE Hum-PUP-Middle-front-03.nc )

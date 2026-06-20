@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Get-ChildItem -Path \"G:\\\\Shared drives\\\\AlloyProjectFiles\\\\Customer CAD files\\\\Alloy-Standard-Builds-CAM\\\\PycharmProjects\\\\CC2\" -Recurse -File | Where-Object { $_.Extension -match '\\\\.\\(py|json|yaml|yml|txt|cfg|ini|toml|md\\)$' } | Select-Object FullName | Format-Table -AutoSize)"
+    ]
+  }
+}

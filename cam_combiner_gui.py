@@ -1,0 +1,946 @@
+import errno
+
+from cam_core.version import GUI_BANNER, APP_BANNER, VERSION
+from cam_core.jsonc_loader import load_config_file, normalize_legacy
+from cam_core.planner import plan, scan_files
+from cam_core.debug import debug_dump_all, debug_print
+from cam_core.cam_file import CAMFile
+from cam_core.CAMFeature import CAMFeature
+from cam_core.Tool import Tool
+from cam_core.FeatureBlock import FeatureBlock
+
+import dearpygui.dearpygui as dpg  # type: ignore
+import os, re
+
+print(GUI_BANNER)
+print("="*40)
+print(APP_BANNER)
+print("="*40)
+
+dpg.create_context()
+dpg.create_viewport(title=f"CAM Combiner {VERSION}", width=2500, height=1250)
+
+state = {
+    "base": os.getcwd(),
+    "output_base": None,
+    "cfg_path": None,
+    "cfg": None,                # static config file
+    "params": {},               # dynamic value of config paramaters
+    "param_values": {},         # dynamic value of string to use in gui for choices
+}
+
+param_based_color = (255, 0, 0, 255)  # red
+feature_based_color = (0, 255, 0, 255)  # green
+enabled_feature_color = (25, 255, 0, 255)  # green
+root_non_param_color = (0, 0, 255, 255)  # blue
+feat_color = (255, 255, 255, 255) # white
+enabled_tool_color =  (255, 255, 0, 255) #
+
+CAMFiles: list[CAMFile] = []           # CAMFile objects
+CAMFeatures: list[CAMFeature] = []      # CAMFeature objects
+FeatureBlocks: list[FeatureBlock] = []     # FeatureBlock objects
+CAMTools: list[Tool] = []
+
+def _on_param_change(sender, app_data, user_data):
+    """Combo callback: keep state['params'] in sync with GUI."""
+    name = user_data
+    state["params"][name] = app_data
+
+    run_plan()
+    _refresh_ui(False)
+
+
+def _toggle_feature(cid: str, value: bool, feature: CAMFeature):
+    if value:
+        feature.set_enabled()
+    else:
+        feature.clear_enabled()
+
+    run_plan()
+    _refresh_ui(False)
+
+
+def _is_file_enabled(file_target: CAMFile)->bool:
+
+    if not "by_step" in state:
+        return False
+
+    if not "resolved" in state:
+        return False
+
+    for out in state["resolved"]:
+        step = str(out.get("step", ""))
+        step_files = state["by_step"].get(step, [])
+        for s in step_files:
+            #print("checking for "+file_target.name +" against: "+s.name)
+            if s.name == file_target.name:
+                #print("match!")
+                return True
+
+    return False
+
+
+def _refresh_ui(recreate_params: bool):
+    global CAMFiles, CAMFeatures, FeatureBlocks, CAMTools
+    global feat_color, enabled_feature_color, root_non_param_color, param_based_color
+    verbose = False
+
+    # clear all previously created dynamic elements
+    if recreate_params and dpg.does_item_exist("Parameters"):
+        # delete all children
+        for child in list(dpg.get_item_children("Parameters", 1) or []):
+            dpg.delete_item(child)
+    if recreate_params and dpg.does_item_exist("features_box"):
+        # delete all children
+        for child in list(dpg.get_item_children("features_box", 1) or []):
+            dpg.delete_item(child)
+    if dpg.does_item_exist("Options"):
+        # delete all children
+        for child in list(dpg.get_item_children("Options", 1) or []):
+            dpg.delete_item(child)
+    if dpg.does_item_exist("model_params"):
+        # delete all children
+        for child in list(dpg.get_item_children("model_params", 1) or []):
+            dpg.delete_item(child)
+    if dpg.does_item_exist("files"):
+        # delete all children
+        for child in list(dpg.get_item_children("files", 1) or []):
+            dpg.delete_item(child)
+    if dpg.does_item_exist("tools"):
+        # delete all children
+        for child in list(dpg.get_item_children("tools", 1) or []):
+            dpg.delete_item(child)
+
+    # Only recreate the Parameters and Features sections on request (they are "stateful")
+    if recreate_params:
+        with dpg.group(horizontal=False, parent="Parameters"):
+            for p in state["params"]:
+                with dpg.group(horizontal=True, parent="Parameters"):
+                     # Label + combo per parameter
+                    if state["param_values"][p] == "":
+                        dpg.add_checkbox(label=p,
+                                         default_value=False,  # default OFF
+                                         callback=_on_param_change,
+                                         user_data=p)
+                    else:
+                        dpg.add_text(p, color=param_based_color)
+                        dpg.add_combo(
+                            tag=f"param_{p}",
+                            items=state["param_values"][p],
+                            default_value=state["params"][p],
+                            width=200,
+                            callback=_on_param_change,
+                            user_data=p
+                        )
+
+        with dpg.group(parent="features_box"):
+            for fb in FeatureBlocks:
+                if fb.get_CAM_features() == []:
+                    continue
+
+                dpg.add_separator(label=fb.get_name())
+
+                for f in fb.get_CAM_features():
+                    if verbose:
+                        debug_print("trying to build button for feature:", f.name)
+
+                    cid = dpg.add_checkbox(label=f.name,
+                                           default_value=False, # default OFF
+                                           callback=_toggle_feature,
+                                           user_data=f)
+                    f.set_radiobtn(cid)
+
+    # Mirror a readable dump of params in the Options text box (handy for copy/paste)
+    with dpg.group(parent="Options"):
+        dpg.add_text("Chosen Parameters:\n")
+        for k, v in sorted(state["params"].items()):
+            line = f"{k:20s} = {v}"
+            dpg.add_text(line)
+
+    # update_model_params:
+    with dpg.group(parent="model_params"):
+        dpg.add_text("Model And Fixture Parameters:")
+        dpg.add_text("   Model       = " + str(state["cfg"]["MODEL"]))
+        dpg.add_text("   Center Line = " + str(state["cfg"]["CLINE"]))
+        dpg.add_text("   CL-to-CL    = " + str(state["cfg"]["CLINE_DELTA"]))
+        dpg.add_text("   Max Units   = " + str(state["cfg"]["MAXUNITS"]))
+        dpg.add_text("   Direction   = " + str(state["cfg"]["DIRECTION"]))
+
+    with (dpg.group(parent="tools")):
+        # Only available if scrollX/scrollY are disabled and stretch columns are not used
+        with dpg.table(header_row=True,
+                       policy=dpg.mvTable_SizingStretchProp,
+                       resizable=True,
+                       no_host_extendX=True,
+                       borders_innerV=True,
+                       borders_outerV=True,
+                       borders_outerH=True):
+
+            dpg.add_table_column(label="Num", width=30)
+            dpg.add_table_column(label="Desc", width=150)
+            dpg.add_table_column(label="Files", width=250)
+
+            for t in sorted(CAMTools, key=lambda x: int(x.tnum) if x is not None else 0):
+                tnum = t.get_tool_num()
+                tdesc = t.get_desc()
+                tfiles = ""
+                with dpg.table_row():
+                    dpg.add_text(str(tnum))
+                    dpg.add_text(tdesc, wrap=150)
+                    with dpg.group():
+                        for f in t.get_files():
+                            if _is_file_enabled(f):
+                                #print("got one!"+f.name)
+                                dpg.add_text(f.name, color=enabled_tool_color)
+                            else:
+                                dpg.add_text(f.name)
+
+
+
+    with (dpg.group(parent="files")):
+        # Only available if scrollX/scrollY are disabled and stretch columns are not used
+        with dpg.table(header_row=True,
+                       policy=dpg.mvTable_SizingStretchProp,
+                       resizable=True,
+                       no_host_extendX=True,
+                       borders_innerV=True,
+                       borders_outerV=True,
+                       borders_outerH=True):
+
+            dpg.add_table_column(label="File Name")
+            dpg.add_table_column(label="Tool")
+            dpg.add_table_column(label="Step")
+            dpg.add_table_column(label="Feature")
+            dpg.add_table_column(label="Rule Match")
+
+
+            txt_color = param_based_color
+            for f in CAMFiles:
+                tnum = str(f.get_toolnum())
+                step = str(f.get_step())
+                feat_name = ""
+                rule_match = ""
+                if f._dir == state["base"]:
+                    # Root directory files. if params are active: param color else root color
+                    if "INPUT-FILE-NAME-BASES" in state["cfg"]:
+                        # param based
+                        txt_color = param_based_color
+                        rule_match = f.get_matching_search_string()
+                    else:
+                        txt_color = root_non_param_color
+
+                else:
+                    txt_color = feature_based_color
+                    feat_name = f.get_feature_name()
+                    for ft in CAMFeatures:
+                        if ft.name == feat_name:
+                            if ft.get_enabled():
+                                feat_color = enabled_feature_color
+                            break
+
+                with dpg.table_row():
+                    dpg.add_text(f.name, color=txt_color)
+                    dpg.add_text(tnum)
+                    dpg.add_text(step)
+                    dpg.add_text(feat_name, color=feat_color)
+                    dpg.add_text(rule_match)
+                    #print("RM: "+f.name+" "+rule_match+"<====>"+f.get_matching_search_string())
+
+
+def _get_enabled_features() -> list[CAMFeatures]:
+    global CAMFiles, CAMFeatures, FeatureBlocks, CAMTools
+    outlist: list[CAMFeature] = []
+    for f in CAMFeatures:
+        if f.get_enabled():
+            outlist.append(f)
+
+    return outlist
+
+
+def run_plan(sender=None, app_data=None, user_data=None):
+    global CAMFiles, CAMFeatures, FeatureBlocks, CAMTools
+
+    verbose=False
+
+    if not state["cfg"] or not state["base"]:
+        debug_print("[warn] Choose a base directory and config file first.")
+        return
+    cfg = state["cfg"]
+
+    # Verbose dump (unchanged)
+    if (verbose):
+        debug_print(debug_dump_all(state["base"], state["params"], CAMFiles, CAMFeatures, FeatureBlocks))
+
+    enabled_features = _get_enabled_features()
+    if (verbose):
+        for f in enabled_features:
+            debug_print(f.name())
+
+    resolved, by_step = plan(cfg,
+                             state["params"],
+                             CAMFiles,
+                             state["base"],
+                             FeatureBlocks,
+                             enabled_features,
+                             verbose=False)
+
+
+    # List the planned file outputs to the "Outputs" window
+    header = ""
+    header += "Step "
+    header += "Out Name                           "
+    header += "CAM Files Included"
+    parts = header + "\n"
+    for out in resolved:
+        step = str(out.get("step", ""))
+        name = out.get("name", "")
+
+        parts += f"{step:02}   "
+        parts += f"{name:35s}"
+        step_files = by_step.get(step, [])
+        if not step_files:
+            parts += "\n"
+            continue
+        comma=''
+        for f in step_files:
+            parts += comma + f.name
+            comma = '    '
+        parts += "\n"
+
+    dpg.set_value("Outputs", parts)
+    debug_print(parts)
+
+    state["resolved"] = resolved
+    state["by_step"] = by_step
+
+
+def generate_output(sender=None, app_data=None, user_data=None):
+    global CAMFiles, CAMFeatures, FeatureBlocks, CAMTools
+
+    debug_print("=================================================")
+    debug_print("=================================================")
+    debug_print("=================================================")
+    outputs = state["resolved"]
+    by_step = state["by_step"]
+    cfg = state["cfg"]
+
+    #debug_print(outputs)
+    #debug_print(by_step)
+
+    model = state["cfg"]["MODEL"]
+    cline = state["cfg"]["CLINE"]
+    cline_delta = float(state["cfg"]["CLINE_DELTA"])
+    max_units = state["cfg"]["MAXUNITS"]
+    direction = state["cfg"]["DIRECTION"]
+    lefty = state["params"]["Lefty"]
+
+    #debug_print(model+str(cline)+str(cline_delta)+str(max_units)+direction+str(lefty))
+
+    # for each file, ask the CAMFile object to produce the code for all individual units.
+    for f in CAMFiles:
+        f.create_unit_code(max_units, cline_delta, direction)
+
+    write_output_files()
+
+
+
+def write_output_file(cfile, fname, output_file, start_unit: int, num_units: int, mirror: bool, tnum, suppress_end_code: bool, cline: float, cline_delta: float, direction):
+    global CAMFiles, CAMFeatures, FeatureBlocks, CAMTools
+
+    #debug_print("Writing Output File ", fname, "==>", output_file)
+    output_file.write("( BEGIN FILE " + fname + "TNUM: " + str(tnum) + " )\n")
+    status = "( Lefty:" + str(mirror) + " Nunits:" + str(num_units) + " )\n"
+    output_file.write(status)
+    status = "( cline: " + str(cline) + " delta:" + str(cline_delta) + " )\n"
+    output_file.write(status)
+    status = "( start_unit: "+ str(start_unit) + " num_units: " + str(num_units) + ")\n"
+    output_file.write(status)
+
+    outlist = cfile.get_output( mirror,
+                                cline,
+                                cline_delta,
+                                start_unit,
+                                num_units,
+                                direction,
+                                suppress_end_code)
+    for line in outlist:
+        output_file.write(line)
+
+    output_file.write("( END FILE " + fname + " )\n")
+
+
+def write_output_files():
+    global CAMFiles, CAMFeatures, FeatureBlocks, CAMTools
+    debug_wof = True
+
+    outputs = state["resolved"]
+    by_step = state["by_step"]
+
+    model = state["cfg"]["MODEL"]
+    cline = state["cfg"]["CLINE"]
+    cline_delta = float(state["cfg"]["CLINE_DELTA"])
+    max_units = state["cfg"]["MAXUNITS"]
+    if state["params"]["unit_1_only"]:
+        units_to_produce = 1
+    else:
+        units_to_produce = max_units
+    direction = state["cfg"]["DIRECTION"]
+    lefty = state["params"]["Lefty"]
+    base_input_dir = state["base"]
+    base_output_dir = state["output_base"]
+    num_steps = state["cfg"]["NUM-STEPS"]
+    output_file_names = state["cfg"]["OUTPUT-FILE-NAMES"]
+
+    # create output directories
+    if debug_wof:
+        debug_print("*************** creating output directories")
+    for unitnum in range(1, units_to_produce + 1):
+        # create output directories
+        if debug_wof:
+            debug_print("making " + base_output_dir + "/" + str(unitnum))
+        try:
+            os.makedirs(base_output_dir + "/" + str(unitnum) + "/IndFiles", True)
+        except OSError as error:
+            if error.errno != errno.EEXIST:
+                debug_print("FATAL ERROR: can't create directory: ", base_output_dir + "/" + str(unitnum) + " ERROR: " + str(error) )
+                dpg.destroy_context()
+
+    for unitnum in range(2, units_to_produce + 1):
+        # create output directories
+        try:
+            os.makedirs(base_output_dir + "/1to" + str(unitnum) + "/IndFiles", True)
+        except OSError as error:
+            if error.errno != errno.EEXIST:
+                debug_print("FATAL ERROR: can't create directory: ", base_output_dir + "/1to" + str(unitnum) + "/IndFiles ==> ERROR: " + str(error) )
+                dpg.destroy_context()
+
+    # create output files by step
+    for out in outputs:
+        stepnum = out["step"]
+        if debug_wof:
+            print("*************** write_output_files: step #", stepnum, ": ", out["name"])
+        if (not stepnum in by_step) or (len(by_step[stepnum]) == 0):
+            # no files for output file #i
+            if debug_wof:
+                debug_print("*************** No files for this step.")
+            continue
+
+        output_file = open(base_output_dir + "/" + out["name"], "w")
+        if not output_file:
+            print("FATAL ERROR CAN NOT OPEN OUTPUT FILE: ", out["name"])
+            dpg.destroy_context()
+
+        output_file_ind_unit = []
+        for unit in range(0, units_to_produce):
+            unit_fn = base_output_dir + "/" + str(unit+1) + "/" + out["name"]
+            newfile = open(unit_fn, "w")
+            if debug_wof:
+                print("...opening unit output file: ", unit_fn, "result: ", newfile)
+            if not newfile:
+                print("FATAL ERROR CAN NOT OPEN OUTPUT FILE: ", outputs[stepnum], " for unit " + str(unit))
+                dpg.destroy_context()
+            output_file_ind_unit.append(newfile)
+
+        lastf = None
+        for f in by_step[stepnum]:
+            lastf = f
+
+        for f in by_step[stepnum]:
+            if debug_wof:
+                print("*************** write_output_files outputting " + f.name + " to " + base_output_dir + "/" + out["name"])
+
+            current_tool_num = f.get_toolnum()
+            if f == lastf:
+                next_tool_num = -1
+            else:
+                found_me = False
+                nextfile: CAMFiles = None
+                for q in by_step[stepnum]:
+                    if found_me:
+                        nextfile = q
+                        break
+                    if q == f:
+                        found_me = True
+                if nextfile:
+                    next_tool_num = nextfile.get_toolnum()
+                else:
+                    next_tool_num = -1
+
+            if next_tool_num == current_tool_num:
+                suppress_end_code = True
+            else:
+                suppress_end_code = False
+
+            if re.search("-NODUP", f.name):
+                # NODUP IMPLIES NOMIRROR
+                # no duplication/displacement and no mirroring for this file
+                numUnits = 1
+                mirror_active = False
+            else:
+                numUnits = units_to_produce
+                mirror_active = lefty
+
+            if re.search("-NOMIRROR", f.name):
+                mirror_active = False
+
+            write_output_file(f,
+                              f.name,
+                              output_file,
+                              1, numUnits,
+                              mirror_active,
+                              current_tool_num,
+                              suppress_end_code,
+                              cline, cline_delta, direction)
+            if numUnits == 1:
+                # output this file only in the unit 1 output
+                if debug_wof:
+                    print("*************** write_output_files ind units " + f.name + " to " + base_output_dir + "/1/" + out["name"])
+                write_output_file(f, f.name, output_file_ind_unit[0],
+                            1, 1,
+                            mirror_active,
+                            current_tool_num,
+                            suppress_end_code,
+                            cline, cline_delta, direction)
+            else:
+                for unit in range (0, units_to_produce):
+                    # output this file for each unit
+                    if debug_wof:
+                        print("*************** write_output_files ind units " + f.name + " to " + base_output_dir + "/" + str(unit) + "/" + out["name"])
+                    write_output_file(f,
+                                      f.name,
+                                      output_file_ind_unit[unit],
+                                      unit+1,
+                                      1,
+                                      mirror_active,
+                                      current_tool_num,
+                                      suppress_end_code,
+                                      cline, cline_delta, direction)
+
+        for unit in range(0, units_to_produce):
+            output_file_ind_unit[unit].close()
+
+
+    if debug_wof:
+        print("*************** outputing individual files")
+    for cfile in CAMFiles:
+        # output individual files for each unit, appropriately mirrored if lefty
+        fname = cfile.name
+        for i in range(1, units_to_produce + 1):
+            ofname = base_output_dir + "/" + str(i) + "/IndFiles/" + fname
+            if re.search("-NODUP", fname):
+                if i == 1:
+                    if debug_wof:
+                        print("     NoDUP. Outputing for unit 1 only")
+                    # no duplication, displacement, do not output to the individual units except for first unit.
+                    # do not suppress end codes
+                    output_file = open(ofname, "w")
+                    write_output_file(cfile, fname, output_file, 1, 1, False,  -1, False, cline, cline_delta, direction)
+                    output_file.close()
+                else:
+                    if debug_wof:
+                        print("     NoDUP. Not outputing for unit ", i)
+            else:
+                if debug_wof:
+                    print("     Normal file, outputting for unit ", i, "only.")
+                output_file = open(ofname, "w")
+                write_output_file(cfile, fname, output_file, i, 1, lefty, -1, False, cline, cline_delta, direction)
+                output_file.close()
+
+        # this is not necessary for determining suppression of end codes (since we won't)
+        # but is still necessary since it is output in comments into the file
+        current_tool_num = cfile.get_toolnum()
+
+        # do not suppress end code since files are intended to be run independently
+        suppress_end_code = False
+
+        if debug_wof:
+            print("*************** outputing composite files")
+            # for each possible number of units from 1-config.numUnits, build individual files for multiple units
+        for i in range(2, units_to_produce + 1):
+            fname = cfile.name
+
+            ofname = base_output_dir + "/1to" + str(i) + "/IndFiles/" + fname
+            output_file = open(ofname, "w")
+            if re.search("-NODUP", fname):
+                # no duplication, displacement, mirroring for this one.
+                if debug_wof:
+                    print("     NODUP case. This was already written above")
+                continue
+
+            else:
+                if debug_wof:
+                    print("     Normal file, outputting for units [1:", i, "] to ", ofname)
+                write_output_file(cfile, fname, output_file, 1, i, lefty, -1, True, cline, cline_delta, direction)
+
+
+    # *************************************************************************************************
+    if debug_wof:
+        print("********** Dumping summary.txt file")
+    # dump out a list of input files, etc. and the output mapping
+    output_file = open(base_output_dir + "/" + "summary.txt", "w")
+    output_file.write("Model:" + str(model) + "\n")
+    output_file.write("\nLefty:" + str(lefty) + "\nNunits:" + str(units_to_produce) + "\n")
+    output_file.write(
+        "\nCline: " + str(cline) + "\nClineDelta:" + str(cline_delta) + " \nDirection:" + str(
+            direction) + "\n")
+    output_file.write("\nInput Dir:" + str(base_input_dir) + "\nOutput Dir:" + str(base_output_dir) + "\n")
+
+    output_file.write("**************************************************************\n")
+    output_file.write("**********OutputFileNames*************************************\n")
+
+    for stepnum in range(0, num_steps):
+        output_file.write(output_file_names[stepnum] + "\n")
+        stepstr = str(stepnum).zfill(2)
+        if stepstr in by_step:
+            for f in by_step[stepstr]:
+                output_file.write("\t" + f.name + "\tT" + str(f.get_toolnum()) + "\n")
+
+    output_file.write("**************************************************************\n\n")
+
+
+    if (0):
+        output_file.write("**************************************************************\n")
+        output_file.write("**********OutputFileContents**********************************\n")
+        for stepnum in range(0, config.NumSteps):
+            output_file.write(config.output_file_names[stepnum] + ":\n")
+            for j in file_list[i]:
+                output_file.write("\t" + j.name + "\tT" + str(j.get_toolnum()) + "\n")
+
+        output_file.write("**************************************************************\n\n")
+
+        output_file.write("**************************************************************\n")
+        output_file.write("**********CAMFiles********************************************\n")
+        for f in CAMFiles:
+            config.input_dir = str(f.get_dir())
+            output_file.write("CAM file: " + config.input_dir + "\\" + f.name())
+            output_file.write("\n")
+
+        output_file.write("**************************************************************\n\n")
+
+    if (0):
+        output_file.write("**************************************************************\n")
+        output_file.write("**********CAMFiles: stats**************************************\n")
+        output_file.write("XMin\tXMax\tYMin\tYMax\tZMin\tZMax")
+        output_file.write("\tTNUM")
+        output_file.write("\tSMin\tSMax")
+        output_file.write("\tFileName\n")
+
+        for f in CAMFiles:
+            output_file.write(str(f.min_x))
+            output_file.write("\t" + str(f.max_x))
+            output_file.write("\t" + str(f.min_y))
+            output_file.write("\t" + str(f.max_y))
+            output_file.write("\t" + str(fmin_z))
+            output_file.write("\t" + str(f.max_z))
+            output_file.write("\t" + str(f.get_toolnum()))
+            output_file.write("\t" + str(f.min_s))
+            output_file.write("\t" + str(f.max_s))
+            output_file.write("\t" + str(f))
+            output_file.write("\n")
+
+        output_file.write("**************************************************************\n\n")
+
+
+    # *************************************************************************************************
+    # And close the summary file.
+    # *************************************************************************************************
+    output_file.close()
+    # *************************************************************************************************
+    # *************************************************************************************************
+
+    # *************************************************************************************************
+    # generate a tool list to be output to the output directory, and check to see if there are any potential conflicts
+    # in tool number assignments - if the tool descriptions for two tools with the same number do not match.
+    # *************************************************************************************************
+    have_error = False
+    have_warning = False
+    tools_filename = base_output_dir + f"/tools.txt"
+    tfile = open(tools_filename, "w")
+    tfile.write("Model:" + str(model) + "\n")
+    tfile.write("\nLefty:" + str(lefty) + "\nNunits:" + str(units_to_produce) + "\n")
+
+    tfile.write(
+        "\nCline: " + str(cline) + "\nClineDelta:" + str(cline_delta) + " \nDirection:" + str(
+            direction) + "\n")
+    tfile.write("\nInput Dir:" + str(base_input_dir) + "\nOutput Dir:" + str(base_output_dir) + "\n")
+
+    tfile.close()
+    tfile = open(tools_filename, "a")
+
+    for t in sorted(CAMTools, key=lambda x: int(x.tnum) if x is not None else 0):
+        mytoolnum = t.get_tool_num()
+        mydesc = t.get_desc()
+
+        # Determine if the file in question is actually used in this run, as determined by the user-chosen options.
+        # If not, then note the potential error as a warning
+        for f in t.get_files():
+            myfilename = f.name
+
+            if False and debug_wof:
+                debug_print("********** Tool check: ", mytoolnum, myfilename, mydesc)
+
+            myfile = None
+            # get the CAMFile object for this file name
+            for cfile in CAMFiles:
+                if False and debug_wof:
+                    debug_print("checking: ", cfile.get_name(), myfilename)
+                if (cfile.get_name() == myfilename):
+                    myfile = cfile
+                    break
+
+            if myfile == None:
+                # huh? didn't find the CAM file for this. WTF?
+                debug_print("WTF. can't find my own CAM File structure! Aborting." + myfilename)
+                debug_print(CAMFiles)
+                dpg.destroy_context()
+
+        for t2 in sorted(CAMTools, key=lambda x: int(x.tnum)):
+
+            if (t2.get_tool_num() == mytoolnum):
+                # OK, this is our toolnumber before! (or this is the same tool... but no matter)
+                if t2.get_desc() != mydesc:
+                    # debug_print("error! inside ", mytoolnum, mydesc, myfilename)
+                    # this is the problem case: mark it as such
+                    t2file = None
+                    # get the CAMFile object for this file name
+                    for f2 in CAMFiles:
+                        if f2 in t2.get_files():
+                            t2file = f2
+                            break
+
+                    if t2file == None:
+                        # huh? didn't find the CAM file for this. WTF?
+                        debug_print("WTF. can't find T2 CAM File structure! Aborting.")
+                        dpg.destroy_context()
+
+                    if 0 and (    CAMFiles[myfilenum].get_selected() or
+                            CAMFiles[t2filenum].get_selected()):
+                        have_error = True
+                        t.set_error(True)
+                        t2.set_error(True)
+                    else:
+                        have_warning = True
+                        t.set_warning(True)
+                        t2.set_warning(True)
+
+    if 0:
+        if have_warning:
+            # put some error text out the GUI to let the user know
+            dpg.set_value(error_txt, "WARNING: conflicting tool numbers. See tools.txt in the output directory.")
+        if have_error:
+            # put some error text out the GUI to let the user know
+            dpg.set_value(error_txt, "ERROR: conflicting tool numbers. See tools.txt in the output directory.")
+
+    # write the tool list out to the file but filter out repeats but not error cases
+    last_tnum = -1
+    tfile.write("Error\tTnum\tDesc\tFirstOccuranceFile\n")
+    for t in sorted(CAMTools, key=lambda x: int(x.tnum)):
+        if not t.get_error() and not t.get_warning() and t.get_tool_num() == last_tnum:
+            # debug_print("skipping tool")
+            continue
+        last_tnum = t.get_tool_num()
+        # debug_print("writing tool")
+        tfile.write(f"{t}\n")
+    tfile.close()
+
+    if 0:
+        # create archive files (in, out)
+        dtime: datetime = datetime.now()
+        base_name = model + "--" + str(
+            dtime.year) + "-" + "%02d" % dtime.month + "-" + "%02d" % dtime.day + "--" + "%02d" % dtime.hour + "-" + "%02d" % dtime.minute + "-" + "%02d" % dtime.second
+        root_dir = "G:\\Shared drives\\AlloyProjectFiles\\Customer CAD files\\Alloy-Standard-Builds-CAM\\Archive"
+        archive_name = str(Path(root_dir + "\\" + base_name + "-in"))
+        adir = config.input_dir
+        shutil.make_archive(archive_name, "gztar", adir)
+
+        archive_name = str(Path(root_dir + "\\" + base_name + "-out"))
+        adir = config.output_dir
+        shutil.make_archive(archive_name, "gztar", adir)
+
+    debug_print("********** Done Dumping Files! ******************")
+
+
+def choose_out(sender, app_data):
+    global CAMFiles, CAMFeatures, FeatureBlocks, CAMTools
+
+    state["output_base"] = app_data["file_path_name"]
+    dpg.set_value("out_val", state["output_base"])
+
+    # Auto-select config in base (unchanged behavior)
+    cfg_path = os.path.join(state["output_base"], "fixture_config.txt")
+    set_cfg(cfg_path)
+
+
+def choose_base(sender, app_data):
+    global CAMFiles, CAMFeatures, FeatureBlocks, CAMTools
+
+    state["base"] = app_data["file_path_name"]
+    dpg.set_value("base_val", state["base"])
+
+    # Auto-select config in base (unchanged behavior)
+    cfg_path = os.path.join(state["base"], "fixture_config.txt")
+    set_cfg(cfg_path)
+
+    # Auto-select output directory *-in ==> *-out
+    if re.search("-in$", state["base"]):
+        out_path = state["base"]
+        out_path = re.sub("-in$", "-out", out_path)
+        state["output_base"] = out_path
+        dpg.set_value("out_val", state["output_base"])
+
+    # Scan & refresh Features
+    CAMFiles, FeatureBlocks, CAMFeatures, CAMTools = scan_files(state["base"])
+
+    run_plan()
+
+    _refresh_ui(True)
+
+
+def choose_cfg(sender, app_data):
+    path = app_data["file_path_name"]
+    set_cfg(path)
+
+
+def set_cfg(path):
+    try:
+        cfg = normalize_legacy(load_config_file(path))
+        if cfg=={}:
+            state["cfg"] = {}
+            state["cfg_path"] = ""
+            dpg.set_value("cfg_val", "None")
+            return
+
+        state["cfg"] = cfg
+        state["cfg_path"] = path
+
+        if "MODEL" not in cfg:
+            debug_print("***********************error: config file doesn't set MODEL")
+            state["cfg"]["MODEL"] = "UNKNOWN"
+        if "CLINE" not in cfg:
+            debug_print("***********************error: config file doesn't set CLINE")
+            state["cfg"]["CLINE"] = 0
+        if "CLINE_DELTA" not in cfg:
+            debug_print("***********************error: config file doesn't set CLINE_DELTA")
+            state["cfg"]["CLINE_DELTA"] = 15.5
+        if "MAXUNITS" not in cfg:
+            debug_print("***********************error: config file doesn't set MAXUNITS")
+            state["cfg"]["MAXUNITS"] = 1
+        if "DIRECTION" not in cfg:
+            debug_print("***********************error: config file doesn't set DIRECTION")
+            state["cfg"]["DIRECTION"] = "HORIZONTAL"
+        if "DIRECTION" not in cfg:
+            debug_print("***********************error: config file doesn't set DIRECTION")
+            state["cfg"]["DIRECTION"] = "HORIZONTAL"
+
+        dpg.set_value("cfg_val", path)
+        debug_print("[info] Config loaded.")
+    except Exception as e:
+        debug_print( f"[error] Failed to load config: {e}")
+        return
+
+    # Build defaults & GUI pulldowns from cfg parameters
+    state["params"] = {}
+    state["params"]["Lefty"] = False
+    state["param_values"]["Lefty"] = ""
+    state["params"]["unit_1_only"] = False
+    state["param_values"]["unit_1_only"] = ""
+
+    params_list = cfg.get("parameters", [])
+    if not isinstance(params_list, list):
+        params_list = []
+
+
+    for p in params_list:
+        if not isinstance(p, dict):
+            continue
+        name = p.get("name")
+        if not name:
+            continue
+        items = p.get("values", [])
+        # normalize: dearpygui expects strings
+        items_str = ["" if v is None else str(v) for v in items] if isinstance(items, list) else []
+        default = p.get("default")
+        default_str = "" if default is None else str(default)
+
+        # Seed state with defaults
+        state["params"][name] = default_str
+        state["param_values"][name] = items_str
+
+    run_plan()
+    _refresh_ui(True)
+
+
+with dpg.window(label="CAM Combiner", width=2500, height=1250):
+    with dpg.group(horizontal=True):
+        with dpg.group(horizontal=False):
+            with dpg.group(horizontal=True):
+                dpg.add_text("Base Directory:")
+                dpg.add_input_text(tag="base_val", readonly=True, width=500)
+                dpg.add_button(label="Choose Base", callback=lambda: dpg.show_item("base_dialog"))
+
+            with dpg.group(horizontal=True):
+                dpg.add_text("Config File:")
+                dpg.add_input_text(tag="cfg_val", readonly=True, width=500)
+                dpg.add_button(label="Choose Config", callback=lambda: dpg.show_item("cfg_dialog"))
+
+            with dpg.group(horizontal=True):
+                dpg.add_text("Output Director:")
+                dpg.add_input_text(tag="out_val", readonly=True, width=500)
+                dpg.add_button(label="Choose Output Dir", callback=lambda: dpg.show_item("out_dialog"))
+
+    dpg.add_separator()
+    with dpg.group(horizontal=True, parent="Parameters"):
+        cid = dpg.add_checkbox(
+            label="Unit 1 Only",
+            tag="unit_1_only",
+            default_value=False,
+            callback = _on_param_change,
+            user_data = "unit_1_only"
+        )
+        state["params"]["unit_1_only"] = False
+        state["param_values"]["unit_1_only"] = ""
+
+        dpg.add_button(label="Plan Outputs", callback=run_plan)
+
+        dpg.add_button(label="Do It!", callback=generate_output)
+
+    dpg.add_separator()
+
+    with dpg.group(horizontal=True, height=750):
+        with dpg.child_window(width=350, border=True):
+            dpg.add_text("Features", color=feature_based_color)
+            dpg.add_group(tag="features_box")  # populated dynamically
+
+        with dpg.child_window(width=350, border=True):
+            dpg.add_text("Parameters", color=param_based_color)
+            dpg.add_group(tag="Parameters")  # populated dynamically
+
+        with dpg.group(horizontal=False, width=350):
+            dpg.add_group(tag="model_params", width=350, height=325)  # populated dynamically
+            dpg.add_group(tag="Options", width=350, height=325)  # populated dynamically
+
+        with dpg.child_window(width=1000, border=True):
+            dpg.add_group(tag="files")  # populated dynamically
+
+        with dpg.child_window(width=500, border=True):
+            dpg.add_group(tag="tools")  # populated dynamically
+
+    dpg.add_separator()
+    dpg.add_input_text(tag="Outputs", multiline=True, height=200)
+    dpg.add_separator()
+    with dpg.child_window(tag="Log_window", border=True):
+        dpg.add_input_text(tag="Log", multiline=True, height=200)
+
+with dpg.file_dialog(directory_selector=True, show=False, callback=choose_base, tag="base_dialog", width=1000, height=500):
+    dpg.add_file_extension(".*")
+
+with dpg.file_dialog(directory_selector=False, show=False, callback=choose_cfg, tag="cfg_dialog", width=1000, height=500):
+    dpg.add_file_extension(".*")
+
+with dpg.file_dialog(directory_selector=True, show=False, callback=choose_out, tag="out_dialog", width=1000, height=500):
+    dpg.add_file_extension(".*")
+
+dpg.setup_dearpygui()
+dpg.show_viewport()
+dpg.start_dearpygui()
+dpg.destroy_context()

@@ -1,0 +1,35 @@
+{
+    "MODEL":"S-style", // no slashes in name
+
+    // FIXTURE DEFINITION
+    "CLINE":9.733,
+    "CLINE_DELTA":15.5,
+    "MAXUNITS":3,
+    "DIRECTION":"HORIZONTAL", // Dir of duplication: HORIZONTAL==x axis (bodies) or VERTICAL==y axis (fingerboards)
+
+    "HasStartAndEnd":"True", // for stages 7 and 9, this determines if the -start and -end are used to distinguish CAM that goes before Features from CAM taht goes after Features are inserted
+    "NUM-STEPS":11,
+    "FRONT-STEP":"07",
+    "BACK-STEP":"09",
+
+    "OUTPUT-FILE-NAMES": [
+            "00-unused.nc",
+            "01-lam-prep-back-up.nc",
+            "02-blank-prep-back-up.nc",
+            "03-unused.nc",
+            "04-blank-prep-front-up.nc",
+            "05-front-facing-with-lam-or-carve-attached-front-up.nc",
+            "06-binding-prep-front-up.nc",
+            "07-front.nc",
+            "08-binding-prep-back-up.nc",
+            "09-back.nc",
+            "10-final-profiles-back-up.nc"
+    ],
+
+    // Defaults
+    "LEFTY":"False",
+    "NUMUNITS":1,
+
+    "unused":"foobar" // all prior lines need trailing comman
+
+}

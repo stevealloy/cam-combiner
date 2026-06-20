@@ -1,0 +1,5 @@
+( BEGIN FILE Hum-PUP-Bridge-front-02.ncTNUM: -1 )
+( Lefty:False Nunits:1 )
+( cline: 9.733 delta:15.5 )
+( start_unit: 2 num_units: 1)
+( END FILE Hum-PUP-Bridge-front-02.nc )
