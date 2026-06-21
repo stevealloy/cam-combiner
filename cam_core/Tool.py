@@ -11,7 +11,7 @@ class Tool:
     def __repr__(self):
         rstr = ""
         if self.error:
-            rstr = "ERROR:\t"
+            rstr = "ERROR:\t" + self.error
         elif self.warning:
             rstr = "WARNING:\t"
         rstr = rstr + "\t"

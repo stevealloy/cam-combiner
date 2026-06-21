@@ -371,7 +371,7 @@ def write_output_file(cfile, fname, output_file, start_unit: int, num_units: int
 
 def write_output_files():
     global CAMFiles, CAMFeatures, FeatureBlocks, CAMTools
-    debug_wof = True
+    debug_wof = False
 
     outputs = state["resolved"]
     by_step = state["by_step"]
@@ -413,6 +413,183 @@ def write_output_files():
             if error.errno != errno.EEXIST:
                 debug_print("FATAL ERROR: can't create directory: ", base_output_dir + "/1to" + str(unitnum) + "/IndFiles ==> ERROR: " + str(error) )
                 dpg.destroy_context()
+
+    # *************************************************************************************************
+    if debug_wof:
+        print("********** Dumping summary.txt file")
+    # dump out a list of input files, etc. and the output mapping
+    output_file = open(base_output_dir + "/" + "summary.txt", "w")
+    output_file.write("Model:" + str(model) + "\n")
+    output_file.write("\nLefty:" + str(lefty) + "\nNunits:" + str(units_to_produce) + "\n")
+    output_file.write(
+        "\nCline: " + str(cline) + "\nClineDelta:" + str(cline_delta) + " \nDirection:" + str(
+            direction) + "\n")
+    output_file.write("\nInput Dir:" + str(base_input_dir) + "\nOutput Dir:" + str(base_output_dir) + "\n")
+
+    output_file.write("**************************************************************\n")
+    output_file.write("**********OutputFileNames*************************************\n")
+
+    for stepnum in range(0, num_steps):
+        output_file.write(output_file_names[stepnum] + "\n")
+        stepstr = str(stepnum).zfill(2)
+        if stepstr in by_step:
+            for f in by_step[stepstr]:
+                output_file.write("\t" + f.name + "\tT" + str(f.get_toolnum()) + "\n")
+
+    output_file.write("**************************************************************\n\n")
+
+
+    if (0):
+        output_file.write("**************************************************************\n")
+        output_file.write("**********OutputFileContents**********************************\n")
+        for stepnum in range(0, config.NumSteps):
+            output_file.write(config.output_file_names[stepnum] + ":\n")
+            for j in file_list[i]:
+                output_file.write("\t" + j.name + "\tT" + str(j.get_toolnum()) + "\n")
+
+        output_file.write("**************************************************************\n\n")
+
+        output_file.write("**************************************************************\n")
+        output_file.write("**********CAMFiles********************************************\n")
+        for f in CAMFiles:
+            config.input_dir = str(f.get_dir())
+            output_file.write("CAM file: " + config.input_dir + "\\" + f.name())
+            output_file.write("\n")
+
+        output_file.write("**************************************************************\n\n")
+
+    if (0):
+        output_file.write("**************************************************************\n")
+        output_file.write("**********CAMFiles: stats**************************************\n")
+        output_file.write("XMin\tXMax\tYMin\tYMax\tZMin\tZMax")
+        output_file.write("\tTNUM")
+        output_file.write("\tSMin\tSMax")
+        output_file.write("\tFileName\n")
+
+        for f in CAMFiles:
+            output_file.write(str(f.min_x))
+            output_file.write("\t" + str(f.max_x))
+            output_file.write("\t" + str(f.min_y))
+            output_file.write("\t" + str(f.max_y))
+            output_file.write("\t" + str(fmin_z))
+            output_file.write("\t" + str(f.max_z))
+            output_file.write("\t" + str(f.get_toolnum()))
+            output_file.write("\t" + str(f.min_s))
+            output_file.write("\t" + str(f.max_s))
+            output_file.write("\t" + str(f))
+            output_file.write("\n")
+
+        output_file.write("**************************************************************\n\n")
+
+
+    # *************************************************************************************************
+    # And close the summary file.
+    # *************************************************************************************************
+    output_file.close()
+    # *************************************************************************************************
+    # *************************************************************************************************
+
+    # *************************************************************************************************
+    # generate a tool list to be output to the output directory, and check to see if there are any potential conflicts
+    # in tool number assignments - if the tool descriptions for two tools with the same number do not match.
+    # *************************************************************************************************
+    have_error = False
+    have_warning = False
+    tools_filename = base_output_dir + f"/tools.txt"
+    tfile = open(tools_filename, "w")
+    tfile.write("Model:" + str(model) + "\n")
+    tfile.write("\nLefty:" + str(lefty) + "\nNunits:" + str(units_to_produce) + "\n")
+
+    tfile.write(
+        "\nCline: " + str(cline) + "\nClineDelta:" + str(cline_delta) + " \nDirection:" + str(
+            direction) + "\n")
+    tfile.write("\nInput Dir:" + str(base_input_dir) + "\nOutput Dir:" + str(base_output_dir) + "\n")
+
+    tfile.close()
+    tfile = open(tools_filename, "a")
+
+    for t in sorted(CAMTools, key=lambda x: int(x.tnum) if x is not None else 0):
+        mytoolnum = t.get_tool_num()
+        mydesc = t.get_desc()
+
+        # Determine if the file in question is actually used in this run, as determined by the user-chosen options.
+        # If not, then note the potential error as a warning
+        for f in t.get_files():
+            myfilename = f.name
+
+            if False and debug_wof:
+                debug_print("********** Tool check: ", mytoolnum, myfilename, mydesc)
+
+            myfile = None
+            # get the CAMFile object for this file name
+            for cfile in CAMFiles:
+                if False and debug_wof:
+                    debug_print("checking: ", cfile.get_name(), myfilename)
+                if (cfile.get_name() == myfilename):
+                    myfile = cfile
+                    break
+
+            if myfile == None:
+                # huh? didn't find the CAM file for this. WTF?
+                debug_print("WTF. can't find my own CAM File structure! Aborting." + myfilename)
+                debug_print(CAMFiles)
+                dpg.destroy_context()
+
+        for t2 in sorted(CAMTools, key=lambda x: int(x.tnum)):
+
+            if (t2.get_tool_num() == mytoolnum):
+                # OK, this is our toolnumber before! (or this is the same tool... but no matter)
+                if t2.get_desc() != mydesc:
+                    # debug_print("error! inside ", mytoolnum, mydesc, myfilename)
+                    # this is the problem case: mark it as such
+                    t2file = None
+                    # get the CAMFile object for this file name
+                    for f2 in CAMFiles:
+                        if f2 in t2.get_files():
+                            t2file = f2
+                            break
+
+                    if t2file == None:
+                        # huh? didn't find the CAM file for this. WTF?
+                        debug_print("WTF. can't find T2 CAM File structure! Aborting.")
+                        dpg.destroy_context()
+
+                    if _is_file_enabled(t2file):
+                        have_error = True
+                        t.set_error(True)
+                        t2.set_error(True)
+                    else:
+                        have_warning = True
+                        t.set_warning(True)
+                        t2.set_warning(True)
+
+    if 0:
+        if have_warning:
+            # put some error text out the GUI to let the user know
+            dpg.set_value(error_txt, "WARNING: conflicting tool numbers. See tools.txt in the output directory.")
+        if have_error:
+            # put some error text out the GUI to let the user know
+            dpg.set_value(error_txt, "ERROR: conflicting tool numbers. See tools.txt in the output directory.")
+
+    # Build one entry per unique (tnum, desc) pair across all CAM files
+    tool_entries = {}
+    for cfile in CAMFiles:
+        t = cfile.get_tool()
+        if t is None:
+            continue
+        key = (t.get_tool_num(), t.get_desc())
+        tool_entries.setdefault(key, []).append(cfile)
+
+    tnum_descs = {}
+    for (tnum, desc) in tool_entries:
+        tnum_descs.setdefault(tnum, set()).add(desc)
+
+    tfile.write("Used\tConflict\tTnum\tDesc\n")
+    for (tnum, desc) in sorted(tool_entries.keys()):
+        is_used = any(_is_file_enabled(f) for f in tool_entries[(tnum, desc)])
+        conflict = len(tnum_descs.get(tnum, set())) > 1
+        tfile.write(f"{'YES' if is_used else 'no'}\t{'CONFLICT' if conflict else ''}\tT#{tnum:02d}\t{desc}\n")
+    tfile.close()
 
     # create output files by step
     for out in outputs:
@@ -585,176 +762,6 @@ def write_output_files():
                 print("     Normal file, outputting for units [1:", i, "] to ", ofname)
             with open(ofname, "w") as output_file:
                 write_output_file(cfile, fname, output_file, 1, i, lefty, -1, True, cline, cline_delta, direction)
-
-
-    # *************************************************************************************************
-    if debug_wof:
-        print("********** Dumping summary.txt file")
-    # dump out a list of input files, etc. and the output mapping
-    output_file = open(base_output_dir + "/" + "summary.txt", "w")
-    output_file.write("Model:" + str(model) + "\n")
-    output_file.write("\nLefty:" + str(lefty) + "\nNunits:" + str(units_to_produce) + "\n")
-    output_file.write(
-        "\nCline: " + str(cline) + "\nClineDelta:" + str(cline_delta) + " \nDirection:" + str(
-            direction) + "\n")
-    output_file.write("\nInput Dir:" + str(base_input_dir) + "\nOutput Dir:" + str(base_output_dir) + "\n")
-
-    output_file.write("**************************************************************\n")
-    output_file.write("**********OutputFileNames*************************************\n")
-
-    for stepnum in range(0, num_steps):
-        output_file.write(output_file_names[stepnum] + "\n")
-        stepstr = str(stepnum).zfill(2)
-        if stepstr in by_step:
-            for f in by_step[stepstr]:
-                output_file.write("\t" + f.name + "\tT" + str(f.get_toolnum()) + "\n")
-
-    output_file.write("**************************************************************\n\n")
-
-
-    if (0):
-        output_file.write("**************************************************************\n")
-        output_file.write("**********OutputFileContents**********************************\n")
-        for stepnum in range(0, config.NumSteps):
-            output_file.write(config.output_file_names[stepnum] + ":\n")
-            for j in file_list[i]:
-                output_file.write("\t" + j.name + "\tT" + str(j.get_toolnum()) + "\n")
-
-        output_file.write("**************************************************************\n\n")
-
-        output_file.write("**************************************************************\n")
-        output_file.write("**********CAMFiles********************************************\n")
-        for f in CAMFiles:
-            config.input_dir = str(f.get_dir())
-            output_file.write("CAM file: " + config.input_dir + "\\" + f.name())
-            output_file.write("\n")
-
-        output_file.write("**************************************************************\n\n")
-
-    if (0):
-        output_file.write("**************************************************************\n")
-        output_file.write("**********CAMFiles: stats**************************************\n")
-        output_file.write("XMin\tXMax\tYMin\tYMax\tZMin\tZMax")
-        output_file.write("\tTNUM")
-        output_file.write("\tSMin\tSMax")
-        output_file.write("\tFileName\n")
-
-        for f in CAMFiles:
-            output_file.write(str(f.min_x))
-            output_file.write("\t" + str(f.max_x))
-            output_file.write("\t" + str(f.min_y))
-            output_file.write("\t" + str(f.max_y))
-            output_file.write("\t" + str(fmin_z))
-            output_file.write("\t" + str(f.max_z))
-            output_file.write("\t" + str(f.get_toolnum()))
-            output_file.write("\t" + str(f.min_s))
-            output_file.write("\t" + str(f.max_s))
-            output_file.write("\t" + str(f))
-            output_file.write("\n")
-
-        output_file.write("**************************************************************\n\n")
-
-
-    # *************************************************************************************************
-    # And close the summary file.
-    # *************************************************************************************************
-    output_file.close()
-    # *************************************************************************************************
-    # *************************************************************************************************
-
-    # *************************************************************************************************
-    # generate a tool list to be output to the output directory, and check to see if there are any potential conflicts
-    # in tool number assignments - if the tool descriptions for two tools with the same number do not match.
-    # *************************************************************************************************
-    have_error = False
-    have_warning = False
-    tools_filename = base_output_dir + f"/tools.txt"
-    tfile = open(tools_filename, "w")
-    tfile.write("Model:" + str(model) + "\n")
-    tfile.write("\nLefty:" + str(lefty) + "\nNunits:" + str(units_to_produce) + "\n")
-
-    tfile.write(
-        "\nCline: " + str(cline) + "\nClineDelta:" + str(cline_delta) + " \nDirection:" + str(
-            direction) + "\n")
-    tfile.write("\nInput Dir:" + str(base_input_dir) + "\nOutput Dir:" + str(base_output_dir) + "\n")
-
-    tfile.close()
-    tfile = open(tools_filename, "a")
-
-    for t in sorted(CAMTools, key=lambda x: int(x.tnum) if x is not None else 0):
-        mytoolnum = t.get_tool_num()
-        mydesc = t.get_desc()
-
-        # Determine if the file in question is actually used in this run, as determined by the user-chosen options.
-        # If not, then note the potential error as a warning
-        for f in t.get_files():
-            myfilename = f.name
-
-            if False and debug_wof:
-                debug_print("********** Tool check: ", mytoolnum, myfilename, mydesc)
-
-            myfile = None
-            # get the CAMFile object for this file name
-            for cfile in CAMFiles:
-                if False and debug_wof:
-                    debug_print("checking: ", cfile.get_name(), myfilename)
-                if (cfile.get_name() == myfilename):
-                    myfile = cfile
-                    break
-
-            if myfile == None:
-                # huh? didn't find the CAM file for this. WTF?
-                debug_print("WTF. can't find my own CAM File structure! Aborting." + myfilename)
-                debug_print(CAMFiles)
-                dpg.destroy_context()
-
-        for t2 in sorted(CAMTools, key=lambda x: int(x.tnum)):
-
-            if (t2.get_tool_num() == mytoolnum):
-                # OK, this is our toolnumber before! (or this is the same tool... but no matter)
-                if t2.get_desc() != mydesc:
-                    # debug_print("error! inside ", mytoolnum, mydesc, myfilename)
-                    # this is the problem case: mark it as such
-                    t2file = None
-                    # get the CAMFile object for this file name
-                    for f2 in CAMFiles:
-                        if f2 in t2.get_files():
-                            t2file = f2
-                            break
-
-                    if t2file == None:
-                        # huh? didn't find the CAM file for this. WTF?
-                        debug_print("WTF. can't find T2 CAM File structure! Aborting.")
-                        dpg.destroy_context()
-
-                    if _is_file_enabled(t2file):
-                        have_error = True
-                        t.set_error(True)
-                        t2.set_error(True)
-                    else:
-                        have_warning = True
-                        t.set_warning(True)
-                        t2.set_warning(True)
-
-    if 0:
-        if have_warning:
-            # put some error text out the GUI to let the user know
-            dpg.set_value(error_txt, "WARNING: conflicting tool numbers. See tools.txt in the output directory.")
-        if have_error:
-            # put some error text out the GUI to let the user know
-            dpg.set_value(error_txt, "ERROR: conflicting tool numbers. See tools.txt in the output directory.")
-
-    # write the tool list out to the file but filter out repeats but not error cases
-    last_tnum = -1
-    tfile.write("Error\tTnum\tDesc\tFirstOccuranceFile\n")
-    for t in sorted(CAMTools, key=lambda x: int(x.tnum)):
-        if not t.get_error() and not t.get_warning() and t.get_tool_num() == last_tnum:
-            # debug_print("skipping tool")
-            continue
-        last_tnum = t.get_tool_num()
-        # debug_print("writing tool")
-        tfile.write(f"{t}\n")
-    tfile.close()
 
     if 0:
         # create archive files (in, out)
