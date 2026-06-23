@@ -11,6 +11,7 @@ Point at a real CAM job folder containing *-in directories:
 """
 from pathlib import Path
 import pytest
+from cam_core.jsonc_loader import load_config_file, normalize_legacy
 
 
 def pytest_addoption(parser):
@@ -25,13 +26,23 @@ def pytest_addoption(parser):
     )
 
 
+def _model_name(in_dir: Path) -> str:
+    """Return MODEL from fixture_config.txt, or '' on any error."""
+    try:
+        cfg = normalize_legacy(load_config_file(str(in_dir / "fixture_config.txt")))
+        return str(cfg.get("MODEL", ""))
+    except Exception:
+        return ""
+
+
 def _collect_pairs(config) -> list[tuple]:
     """Return (in_dir, session_json_or_None) pairs.
 
-    For each *-in directory that has *.json files in the matching *-out
-    directory, one pair is produced per JSON.  If no JSON files exist the
-    directory is still covered with a single (in_dir, None) pair so tests
-    run with default params.
+    For each *-in directory, *.json files in the matching *-out directory
+    are collected — excluding the auto-save file whose stem equals MODEL
+    (that file is the working-state save, not a curated test case).  One
+    pair is produced per remaining JSON.  If none remain the directory is
+    still covered with a (in_dir, None) pair that runs with config defaults.
     """
     raw = config.getoption("--base-dir")
     base = Path(raw) if raw else Path(__file__).parent.parent / "Testing"
@@ -49,7 +60,11 @@ def _collect_pairs(config) -> list[tuple]:
     pairs: list[tuple] = []
     for d in in_dirs:
         out_dir = d.parent / (d.name[:-3] + "-out")   # *-in → *-out
-        jsons = sorted(out_dir.glob("*.json")) if out_dir.is_dir() else []
+        model = _model_name(d)
+        jsons = [
+            j for j in sorted(out_dir.glob("*.json"))
+            if j.stem != model
+        ] if out_dir.is_dir() else []
         if jsons:
             pairs.extend((d, j) for j in jsons)
         else:
