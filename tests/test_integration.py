@@ -181,14 +181,20 @@ def _load_dir(in_dir: Path, session_json: Path = None):
         if name:
             params[name] = p.get("default")
 
-    shared = in_dir.parent / "SharedGCode"
-    scan = scan_files(str(in_dir), shared_dir=str(shared) if shared.is_dir() else None)
-
+    shared_dir = None
     enabled_names: set = set()
     if session_json and Path(session_json).exists():
         data = load_session(str(session_json))
         params.update(data.get("params", {}))
         enabled_names = set(data.get("enabled_features", []))
+        shared_dir = data.get("shared_dir")  # use the dir saved in the session
+
+    if shared_dir is None:
+        # Fall back to sibling SharedGCode directory
+        shared = in_dir.parent / "SharedGCode"
+        shared_dir = str(shared) if shared.is_dir() else None
+
+    scan = scan_files(str(in_dir), shared_dir=shared_dir)
 
     return cfg, params, scan, enabled_names
 
