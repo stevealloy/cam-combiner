@@ -348,7 +348,8 @@ def generate_output(sender=None, app_data=None, user_data=None):
 
     write_output_files()
 
-    json_name = state.get("json_name", "")
+    json_name = dpg.get_value("json_name_val").strip()
+    state["json_name"] = json_name
     model_name = str(state["cfg"].get("MODEL", ""))
     if json_name and json_name != model_name and state.get("output_base"):
         _copy_root_outputs_to_subdir(json_name)
@@ -945,7 +946,9 @@ def _load_selected_session(sender=None, app_data=None):
 
 
 def _save_current_session_manual(sender=None, app_data=None):
-    _save_session_named(state.get("json_name", ""))
+    name = dpg.get_value("json_name_val").strip()
+    state["json_name"] = name
+    _save_session_named(name)
 
 
 def _on_json_name_change(sender, app_data, user_data=None):
