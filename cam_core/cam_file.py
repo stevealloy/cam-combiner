@@ -26,6 +26,7 @@ class CAMFile:
         self._debug = False
         self.name = name
         self._dir = directory
+        self._is_root = is_root
         # self._dir = Path(directory)
 
         self.max_x = -999.99
@@ -77,7 +78,7 @@ class CAMFile:
 
         ##########################################################
         # read the contents of the file into an array
-        f = open(self.filename)
+        f = open(self.filename, encoding='utf-8', errors='replace')
         for line in f:
             # change all home entries to "HOME"
             if line == "X0Y0\n" or line == "G0 X0Y0\n" or line == "X2Y0\n" or line == "G0 X2Y0\n":

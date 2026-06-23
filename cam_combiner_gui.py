@@ -27,6 +27,7 @@ state = {
     "cfg": None,                # static config file
     "params": {},               # dynamic value of config paramaters
     "param_values": {},         # dynamic value of string to use in gui for choices
+    "shared_dir": None,
 }
 
 param_based_color = (255, 0, 0, 255)  # red
@@ -808,8 +809,17 @@ def choose_base(sender, app_data):
         state["output_base"] = out_path
         dpg.set_value("out_val", state["output_base"])
 
+    # Auto-select shared GCode directory: Base/../SharedGCode
+    shared_default = os.path.normpath(os.path.join(state["base"], "..", "SharedGCode"))
+    if os.path.isdir(shared_default):
+        state["shared_dir"] = shared_default
+        dpg.set_value("shared_val", state["shared_dir"])
+    else:
+        state["shared_dir"] = None
+        dpg.set_value("shared_val", "")
+
     # Scan & refresh Features
-    CAMFiles, FeatureBlocks, CAMFeatures, CAMTools = scan_files(state["base"])
+    CAMFiles, FeatureBlocks, CAMFeatures, CAMTools = scan_files(state["base"], shared_dir=state["shared_dir"])
 
     run_plan()
 
@@ -819,6 +829,17 @@ def choose_base(sender, app_data):
 def choose_cfg(sender, app_data):
     path = app_data["file_path_name"]
     set_cfg(path)
+
+
+def choose_shared(sender, app_data):
+    global CAMFiles, CAMFeatures, FeatureBlocks, CAMTools
+
+    state["shared_dir"] = app_data["file_path_name"]
+    dpg.set_value("shared_val", state["shared_dir"])
+
+    CAMFiles, FeatureBlocks, CAMFeatures, CAMTools = scan_files(state["base"], shared_dir=state["shared_dir"])
+    run_plan()
+    _refresh_ui(True)
 
 
 def set_cfg(path):
@@ -906,6 +927,11 @@ with dpg.window(label="CAM Combiner", width=2500, height=1250):
                 dpg.add_button(label="Choose Config", callback=lambda: dpg.show_item("cfg_dialog"))
 
             with dpg.group(horizontal=True):
+                dpg.add_text("Shared GCode Dir:")
+                dpg.add_input_text(tag="shared_val", readonly=True, width=500)
+                dpg.add_button(label="Choose Shared Dir", callback=lambda: dpg.show_item("shared_dialog"))
+
+            with dpg.group(horizontal=True):
                 dpg.add_text("Output Director:")
                 dpg.add_input_text(tag="out_val", readonly=True, width=500)
                 dpg.add_button(label="Choose Output Dir", callback=lambda: dpg.show_item("out_dialog"))
@@ -957,6 +983,9 @@ with dpg.file_dialog(directory_selector=True, show=False, callback=choose_base, 
     dpg.add_file_extension(".*")
 
 with dpg.file_dialog(directory_selector=False, show=False, callback=choose_cfg, tag="cfg_dialog", width=1000, height=500):
+    dpg.add_file_extension(".*")
+
+with dpg.file_dialog(directory_selector=True, show=False, callback=choose_shared, tag="shared_dialog", width=1000, height=500):
     dpg.add_file_extension(".*")
 
 with dpg.file_dialog(directory_selector=True, show=False, callback=choose_out, tag="out_dialog", width=1000, height=500):

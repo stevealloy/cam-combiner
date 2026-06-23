@@ -109,7 +109,7 @@ def _scan_features():
     return
 
 
-def scan_files(base_dir: str, include_ext: Tuple[str,...]=(".nc",)) ->Tuple[List[CAMFile], List[FeatureBlock], List[CAMFeature], List[Tool]]:
+def scan_files(base_dir: str, include_ext: Tuple[str,...]=(".nc",), shared_dir: str=None) ->Tuple[List[CAMFile], List[FeatureBlock], List[CAMFeature], List[Tool]]:
     scan_files.cfiles: [CAMFile] = []
     scan_files.cfeatures: [CAMFeature] = []
     scan_files.fblocks: [FeatureBlock] = []
@@ -119,6 +119,11 @@ def scan_files(base_dir: str, include_ext: Tuple[str,...]=(".nc",)) ->Tuple[List
     scan_files.fblocks.append(scan_files.current_featureblock)
 
     _scan_files_int(base_dir, include_ext)
+
+    if shared_dir:
+        base_block = next(fb for fb in scan_files.fblocks if fb.name == "Base")
+        scan_files.current_featureblock = base_block
+        _scan_files_int(shared_dir, include_ext, block_prefix="Shared")
 
     _scan_features()
 
@@ -136,7 +141,7 @@ def scan_files(base_dir: str, include_ext: Tuple[str,...]=(".nc",)) ->Tuple[List
     return scan_files.cfiles, scan_files.fblocks, scan_files.cfeatures, scan_files.tools
 
 
-def _scan_files_int(base_dir: str, include_ext: Tuple[str,...]=(".nc",)):
+def _scan_files_int(base_dir: str, include_ext: Tuple[str,...]=(".nc",), block_prefix: str=""):
     verbose = False
     skip_files = {"fixture_config.txt", "desktop.ini", "#*", ".*", ".DS_Store"}
 
@@ -174,9 +179,10 @@ def _scan_files_int(base_dir: str, include_ext: Tuple[str,...]=(".nc",)):
         if entry.is_dir():
             if verbose:
                 debug_print("DIR:" + entry.name)
-            scan_files.current_featureblock = FeatureBlock(entry.name, entry.name)
+            block_name = (block_prefix + "/" + entry.name) if block_prefix else entry.name
+            scan_files.current_featureblock = FeatureBlock(block_name, entry.name)
             scan_files.fblocks.append(scan_files.current_featureblock)
-            _scan_files_int(fname)
+            _scan_files_int(fname, include_ext, block_name)
 
     return
 
@@ -305,7 +311,7 @@ def plan(cfg: Dict[str, Any],
         step2 = str(out.get("step",""))
         if step2 in selected_by_step:
             for f in selected_by_step.get(step2, []):
-                featbool.setdefault(f, []).append(f._dir != base_dir)
+                featbool.setdefault(f, []).append(not f._is_root)
                 if re.search("-first", f.name) or re.search("-start", f.name):
                     firstbool.setdefault(f, []).append(True)
                 else:
