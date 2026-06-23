@@ -781,16 +781,23 @@ def choose_base(sender, app_data):
     state["base"] = app_data["file_path_name"]
     dpg.set_value("base_val", state["base"])
 
-    # Auto-select config in base (unchanged behavior)
-    cfg_path = os.path.join(state["base"], "fixture_config.txt")
-    set_cfg(cfg_path)
-
-    # Auto-select output directory *-in ==> *-out
+    # Auto-select output directory *-in ==> *-out (must happen before session check)
     if re.search("-in$", state["base"]):
-        out_path = state["base"]
-        out_path = re.sub("-in$", "-out", out_path)
+        out_path = re.sub("-in$", "-out", state["base"])
         state["output_base"] = out_path
         dpg.set_value("out_val", state["output_base"])
+
+    # Auto-load session from output directory if one exists
+    if state["output_base"]:
+        session_path = os.path.join(state["output_base"], "cam_session.json")
+        if os.path.isfile(session_path):
+            debug_print(f"[info] Auto-loading session from {session_path}")
+            _apply_session(session_path)
+            return
+
+    # No session — normal initialisation
+    cfg_path = os.path.join(state["base"], "fixture_config.txt")
+    set_cfg(cfg_path)
 
     # Auto-select shared GCode directory: Base/../SharedGCode
     shared_default = os.path.normpath(os.path.join(state["base"], "..", "SharedGCode"))
@@ -825,17 +832,17 @@ def choose_shared(sender, app_data):
     _refresh_ui(True)
 
 
-def load_session_file(sender, app_data):
+def _apply_session(path: str) -> bool:
+    """Load session JSON and restore all state. Returns True on success."""
     global CAMFiles, CAMFeatures, FeatureBlocks, CAMTools
-
-    path = app_data["file_path_name"]
-    dpg.set_value("session_val", path)
 
     try:
         data = load_session(path)
     except Exception as e:
         debug_print(f"[error] Failed to load session: {e}")
-        return
+        return False
+
+    dpg.set_value("session_val", path)
 
     # Restore directory paths
     if data.get("base"):
@@ -847,13 +854,11 @@ def load_session_file(sender, app_data):
     state["shared_dir"] = data.get("shared_dir")
     dpg.set_value("shared_val", state["shared_dir"] or "")
 
-    # Load config — this sets param choice lists and default values, then calls
-    # run_plan() + _refresh_ui(True) internally.  We override params afterwards.
+    # Load config — sets param choice lists and defaults, calls _refresh_ui(True)
     if data.get("cfg_path"):
         set_cfg(data["cfg_path"])
 
-    # Override params with saved values (set_cfg already ran _refresh_ui, so
-    # we update state and trigger a full rebuild with the correct values)
+    # Override params with saved values
     state["params"].update(data.get("params", {}))
 
     # Scan files with restored directories
@@ -868,15 +873,19 @@ def load_session_file(sender, app_data):
             feat.set_enabled()
 
     run_plan()
-    # Rebuild UI with the restored param values and feature states
     _refresh_ui(True)
 
-    # After _refresh_ui creates fresh checkboxes, tick the enabled ones
+    # Tick feature checkboxes that were enabled
     for feat in CAMFeatures:
         if feat.get_enabled():
             dpg.set_value(feat.get_radiobtn(), True)
 
     debug_print(f"[info] Session loaded from {path}")
+    return True
+
+
+def load_session_file(sender, app_data):
+    _apply_session(app_data["file_path_name"])
 
 
 def set_cfg(path):
