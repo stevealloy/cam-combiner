@@ -10,6 +10,7 @@ found in Testing/ (default) or under --base-dir if supplied on the CLI:
 """
 import io
 import os
+import re
 import pytest
 from pathlib import Path
 
@@ -201,6 +202,52 @@ def _apply_features(scan, enabled_names: set):
     return [feat for feat in features if feat.get_enabled()]
 
 
+def _generate_step_output(step_files: list, cfg: dict, params: dict) -> str:
+    """Generate the combined G-code for one step, replicating write_output_files logic.
+
+    Mirrors the suppress_end_code, NODUP, NOMIRROR, and lefty handling from the
+    GUI so the result can be compared directly against golden files on disk.
+    """
+    if not step_files:
+        return ""
+
+    cline       = cfg["CLINE"]
+    cline_delta = float(cfg["CLINE_DELTA"])
+    direction   = cfg["DIRECTION"]
+    max_units   = cfg["MAXUNITS"]
+    lefty       = params.get("Lefty", False)
+    units       = 1 if params.get("unit_1_only", False) else max_units
+
+    buf = io.StringIO()
+    last_f = step_files[-1]
+
+    for i, f in enumerate(step_files):
+        current_tnum = f.get_toolnum()
+        next_tnum    = step_files[i + 1].get_toolnum() if f is not last_f else -1
+        suppress     = (next_tnum == current_tnum)
+
+        if re.search("-NODUP", f.name):
+            num_units = 1
+            mirror    = False
+        else:
+            num_units = units
+            mirror    = lefty
+
+        if re.search("-NOMIRROR", f.name):
+            mirror = False
+
+        write_output_file(f, f.name, buf, 1, num_units, mirror,
+                          current_tnum, suppress, cline, cline_delta, direction)
+
+    return buf.getvalue()
+
+
+def _golden_dir(in_dir: Path, session_json) -> Path:
+    """Return the expected-output directory for a given (in_dir, session_json) pair."""
+    out_dir = in_dir.parent / (in_dir.name[:-3] + "-out")
+    return (out_dir / Path(session_json).stem) if session_json else out_dir
+
+
 class TestMultiDir:
     """Runs once per (in_dir, session_json) pair from conftest parametrize.
 
@@ -270,3 +317,34 @@ class TestMultiDir:
             f"{in_dir.name}: BEGIN count mismatch"
         assert out.count("( END FILE") == total_files, \
             f"{in_dir.name}: END count mismatch"
+
+    def test_output_matches_golden(self, in_dir, session_json):
+        golden = _golden_dir(in_dir, session_json)
+        if not golden.is_dir():
+            pytest.skip(f"no golden output directory: {golden}")
+
+        cfg, params, scan, enabled_names = _load_dir(in_dir, session_json)
+        files, blocks, _, _ = scan
+        enabled_feats = _apply_features(scan, enabled_names)
+        resolved, by_step = plan(cfg, params, files, str(in_dir), blocks, enabled_feats)
+
+        max_units   = cfg["MAXUNITS"]
+        cline_delta = float(cfg["CLINE_DELTA"])
+        direction   = cfg["DIRECTION"]
+        for f in files:
+            f.create_unit_code(max_units, cline_delta, direction)
+
+        compared = 0
+        for out in resolved:
+            golden_file = golden / out["name"]
+            if not golden_file.exists():
+                continue
+            generated = _generate_step_output(by_step.get(out["step"], []), cfg, params)
+            expected  = golden_file.read_text(encoding="utf-8", errors="replace")
+            assert generated == expected, (
+                f"{in_dir.name} [{golden.name}]: {out['name']} differs from golden"
+            )
+            compared += 1
+
+        if compared == 0:
+            pytest.skip(f"no golden step files found in {golden}")
