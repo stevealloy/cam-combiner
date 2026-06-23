@@ -1,8 +1,12 @@
 """
 Integration tests using real Testing/ fixture data.
 
-Runs the full scan -> plan -> write pipeline against Testing/Fingerboards-in
-with the config and default parameters from its fixture_config.txt.
+Fixed tests run against Testing/Fingerboards-in specifically.
+Multi-dir tests (TestMultiDir) are parametrized over every *-in directory
+found in Testing/ (default) or under --base-dir if supplied on the CLI:
+
+    python -m pytest tests/test_integration.py -v
+    python -m pytest tests/test_integration.py -v --base-dir "G:/path/to/jobs"
 """
 import io
 import os
@@ -153,3 +157,82 @@ class TestWriteIntegration:
         out = buf.getvalue()
         assert out.count("( BEGIN FILE") == len(step_files)
         assert out.count("( END FILE") == len(step_files)
+
+
+# ---------------------------------------------------------------------------
+# Multi-directory tests
+#
+# `in_dir` is parametrized by conftest.py over every *-in directory found
+# under --base-dir (default: Testing/).  Each test runs once per directory.
+# ---------------------------------------------------------------------------
+
+def _load_dir(in_dir: Path):
+    """Return (cfg, default_params, scan_result) for an *-in directory."""
+    cfg = normalize_legacy(load_config_file(str(in_dir / "fixture_config.txt")))
+    params = {"Lefty": False, "unit_1_only": False}
+    for p in cfg.get("parameters", []):
+        name = p.get("name")
+        if name:
+            params[name] = p.get("default")
+
+    shared = in_dir.parent / "SharedGCode"
+    scan = scan_files(str(in_dir), shared_dir=str(shared) if shared.is_dir() else None)
+    return cfg, params, scan
+
+
+class TestMultiDir:
+    """Runs once per *-in directory; in_dir is injected by conftest parametrize."""
+
+    def test_config_loads(self, in_dir):
+        cfg = normalize_legacy(load_config_file(str(in_dir / "fixture_config.txt")))
+        assert cfg.get("MODEL"), f"{in_dir.name}: config missing MODEL"
+        assert "CLINE" in cfg, f"{in_dir.name}: config missing CLINE"
+
+    def test_scan_returns_files(self, in_dir):
+        cfg, params, (files, blocks, features, tools) = _load_dir(in_dir)
+        assert len(files) > 0, f"{in_dir.name}: scan returned no files"
+
+    def test_base_block_present(self, in_dir):
+        cfg, params, (files, blocks, features, tools) = _load_dir(in_dir)
+        names = [b.name for b in blocks]
+        assert "Base" in names, f"{in_dir.name}: no Base block"
+
+    def test_tools_detected(self, in_dir):
+        cfg, params, (files, blocks, features, tools) = _load_dir(in_dir)
+        assert len(tools) > 0, f"{in_dir.name}: no tools detected"
+
+    def test_plan_runs_without_error(self, in_dir):
+        cfg, params, (files, blocks, features, tools) = _load_dir(in_dir)
+        resolved, by_step = plan(cfg, params, files, str(in_dir), blocks, [])
+        assert len(resolved) > 0, f"{in_dir.name}: plan returned no outputs"
+
+    def test_plan_selects_at_least_one_file(self, in_dir):
+        cfg, params, (files, blocks, features, tools) = _load_dir(in_dir)
+        _, by_step = plan(cfg, params, files, str(in_dir), blocks, [])
+        total = sum(len(v) for v in by_step.values())
+        assert total > 0, f"{in_dir.name}: plan selected no files at all"
+
+    def test_write_pipeline_runs(self, in_dir):
+        cfg, params, (files, blocks, features, tools) = _load_dir(in_dir)
+        _, by_step = plan(cfg, params, files, str(in_dir), blocks, [])
+
+        cline       = cfg["CLINE"]
+        cline_delta = float(cfg["CLINE_DELTA"])
+        direction   = cfg["DIRECTION"]
+        max_units   = cfg["MAXUNITS"]
+
+        for f in files:
+            f.create_unit_code(max_units, cline_delta, direction)
+
+        buf = io.StringIO()
+        for step_files in by_step.values():
+            for f in step_files:
+                write_output_file(f, f.name, buf, 1, max_units, False,
+                                  f.get_toolnum(), False, cline, cline_delta, direction)
+
+        out = buf.getvalue()
+        total_files = sum(len(v) for v in by_step.values())
+        assert out.count("( BEGIN FILE") == total_files, \
+            f"{in_dir.name}: BEGIN count mismatch"
+        assert out.count("( END FILE") == total_files, \
+            f"{in_dir.name}: END count mismatch"
