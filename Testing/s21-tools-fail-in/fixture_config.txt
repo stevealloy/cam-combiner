@@ -1,0 +1,9 @@
+{
+    "MODEL": "FailTools",
+    "CLINE": 0,
+    "CLINE_DELTA": 4,
+    "MAXUNITS": 1,
+    "DIRECTION": "VERTICAL",
+    "OUTPUT-FILE-NAMES": ["01-out.nc"],
+    "unused": "end"
+}

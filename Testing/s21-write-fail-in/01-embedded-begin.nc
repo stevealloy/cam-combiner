@@ -1,0 +1,8 @@
+( TOOL 1 - Bit )
+( BEGIN FILE bogus.nc )
+T01
+S10000
+M3
+G0 Z5
+G0 X10 Y10
+X2Y0

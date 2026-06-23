@@ -1,0 +1,9 @@
+{
+    "MODEL": "FailPlan",
+    "CLINE": 0,
+    "CLINE_DELTA": 4,
+    "MAXUNITS": 1,
+    "DIRECTION": "VERTICAL",
+    "OUTPUT-FILE-NAMES": [],
+    "unused": "end"
+}
