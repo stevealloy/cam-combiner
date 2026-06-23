@@ -964,7 +964,11 @@ def _copy_root_outputs_to_subdir(name: str):
         src = os.path.join(base, fname)
         if os.path.isfile(src):
             shutil.copy2(src, os.path.join(dest, fname))
+    by_step = state.get("by_step", {})
     for out in state.get("resolved", []):
+        step = str(out.get("step", ""))
+        if step and (step not in by_step or not by_step[step]):
+            continue  # not produced in current run; don't copy stale file
         src = os.path.join(base, out["name"])
         if os.path.isfile(src):
             shutil.copy2(src, os.path.join(dest, out["name"]))

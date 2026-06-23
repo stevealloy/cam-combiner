@@ -10,3 +10,4 @@ venv/
 .idea/
 *.iml
 Testing/sstyle-out/
+Testing/Fingerboards-out/
