@@ -5,7 +5,10 @@ SESSION_FILENAME = "cam_session.json"
 _VERSION = 1
 
 
-def save_session(output_dir: str, state: dict, enabled_feature_names: list) -> str:
+def save_session(output_dir: str, state: dict, enabled_feature_names: list,
+                 filename: str = None) -> str:
+    if filename is None:
+        filename = SESSION_FILENAME
     data = {
         "version": _VERSION,
         "base":        state.get("base"),
@@ -15,7 +18,7 @@ def save_session(output_dir: str, state: dict, enabled_feature_names: list) -> s
         "params":      {k: v for k, v in state.get("params", {}).items()},
         "enabled_features": list(enabled_feature_names),
     }
-    path = output_dir.rstrip("/\\") + "/" + SESSION_FILENAME
+    path = output_dir.rstrip("/\\") + "/" + filename
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, default=str)
     return path

@@ -30,7 +30,10 @@ state = {
     "params": {},               # dynamic value of config paramaters
     "param_values": {},         # dynamic value of string to use in gui for choices
     "shared_dir": None,
+    "json_name": "",            # stem of the session JSON file (no extension)
 }
+
+_pending_save_name: list = [None]  # mutable cell for overwrite-confirm dialog
 
 param_based_color = (255, 0, 0, 255)  # red
 feature_based_color = (0, 255, 0, 255)  # green
@@ -345,10 +348,7 @@ def generate_output(sender=None, app_data=None, user_data=None):
 
     write_output_files()
 
-    enabled_names = [f.name for f in CAMFeatures if f.get_enabled()]
-    session_path = save_session(state["output_base"], state, enabled_names)
-    dpg.set_value("session_val", session_path)
-    debug_print(f"[info] Session saved to {session_path}")
+    _save_session_named(state.get("json_name", ""))
 
 
 
@@ -773,6 +773,7 @@ def choose_out(sender, app_data):
     # Auto-select config in base (unchanged behavior)
     cfg_path = os.path.join(state["output_base"], "fixture_config.txt")
     set_cfg(cfg_path)
+    _refresh_session_combo()
 
 
 def choose_base(sender, app_data):
@@ -781,21 +782,12 @@ def choose_base(sender, app_data):
     state["base"] = app_data["file_path_name"]
     dpg.set_value("base_val", state["base"])
 
-    # Auto-select output directory *-in ==> *-out (must happen before session check)
+    # Auto-select output directory *-in ==> *-out
     if re.search("-in$", state["base"]):
         out_path = re.sub("-in$", "-out", state["base"])
         state["output_base"] = out_path
         dpg.set_value("out_val", state["output_base"])
 
-    # Auto-load session from output directory if one exists
-    if state["output_base"]:
-        session_path = os.path.join(state["output_base"], "cam_session.json")
-        if os.path.isfile(session_path):
-            debug_print(f"[info] Auto-loading session from {session_path}")
-            _apply_session(session_path)
-            return
-
-    # No session — normal initialisation
     cfg_path = os.path.join(state["base"], "fixture_config.txt")
     set_cfg(cfg_path)
 
@@ -812,8 +804,8 @@ def choose_base(sender, app_data):
     CAMFiles, FeatureBlocks, CAMFeatures, CAMTools = scan_files(state["base"], shared_dir=state["shared_dir"])
 
     run_plan()
-
     _refresh_ui(True)
+    _refresh_session_combo()
 
 
 def choose_cfg(sender, app_data):
@@ -841,8 +833,6 @@ def _apply_session(path: str) -> bool:
     except Exception as e:
         debug_print(f"[error] Failed to load session: {e}")
         return False
-
-    dpg.set_value("session_val", path)
 
     # Restore directory paths
     if data.get("base"):
@@ -880,12 +870,81 @@ def _apply_session(path: str) -> bool:
         if feat.get_enabled():
             dpg.set_value(feat.get_radiobtn(), True)
 
+    # Set json_name to match the file we just loaded (so Save writes back to same file)
+    json_name = os.path.splitext(os.path.basename(path))[0]
+    state["json_name"] = json_name
+    if dpg.does_item_exist("json_name_val"):
+        dpg.set_value("json_name_val", json_name)
+
+    _refresh_session_combo()
     debug_print(f"[info] Session loaded from {path}")
     return True
 
 
-def load_session_file(sender, app_data):
-    _apply_session(app_data["file_path_name"])
+def _refresh_session_combo():
+    """Scan output dir for *.json files and update the Sessions dropdown."""
+    if not state.get("output_base") or not os.path.isdir(state["output_base"]):
+        return
+    files = sorted(f for f in os.listdir(state["output_base"]) if f.endswith(".json"))
+    if dpg.does_item_exist("session_combo"):
+        dpg.configure_item("session_combo", items=files)
+        current = dpg.get_value("session_combo")
+        if files and current not in files:
+            dpg.set_value("session_combo", files[0])
+
+
+def _write_session_file(name: str):
+    """Write state to <name>.json in output dir and refresh the dropdown."""
+    enabled_names = [f.name for f in CAMFeatures if f.get_enabled()]
+    filename = name + ".json"
+    save_session(state["output_base"], state, enabled_names, filename=filename)
+    _refresh_session_combo()
+    if dpg.does_item_exist("session_combo"):
+        dpg.set_value("session_combo", filename)
+    debug_print(f"[info] Session saved as {filename}")
+
+
+def _do_overwrite_save(sender=None, app_data=None):
+    dpg.configure_item("overwrite_modal", show=False)
+    if _pending_save_name[0]:
+        _write_session_file(_pending_save_name[0])
+        _pending_save_name[0] = None
+
+
+def _save_session_named(name: str):
+    """Save current state as <name>.json, asking confirmation on name conflict."""
+    if not name:
+        debug_print("[warn] Json Name is empty, skipping session save")
+        return
+    if not state.get("output_base"):
+        debug_print("[error] No output directory set, cannot save session")
+        return
+    model_name = str(state["cfg"].get("MODEL", "")) if state.get("cfg") else ""
+    path = os.path.join(state["output_base"], name + ".json")
+    if name != model_name and os.path.isfile(path):
+        _pending_save_name[0] = name
+        if dpg.does_item_exist("overwrite_modal_text"):
+            dpg.set_value("overwrite_modal_text", f'"{name}.json" already exists. Overwrite?')
+        dpg.configure_item("overwrite_modal", show=True)
+    else:
+        _write_session_file(name)
+
+
+def _load_selected_session(sender=None, app_data=None):
+    name = dpg.get_value("session_combo")
+    if not name or not state.get("output_base"):
+        return
+    path = os.path.join(state["output_base"], name)
+    if os.path.isfile(path):
+        _apply_session(path)
+
+
+def _save_current_session_manual(sender=None, app_data=None):
+    _save_session_named(state.get("json_name", ""))
+
+
+def _on_json_name_change(sender, app_data, user_data=None):
+    state["json_name"] = app_data
 
 
 def set_cfg(path):
@@ -920,6 +979,11 @@ def set_cfg(path):
             state["cfg"]["DIRECTION"] = "HORIZONTAL"
 
         dpg.set_value("cfg_val", path)
+        model = cfg.get("MODEL", "")
+        if model:
+            state["json_name"] = model
+            if dpg.does_item_exist("json_name_val"):
+                dpg.set_value("json_name_val", model)
         debug_print("[info] Config loaded.")
     except Exception as e:
         debug_print( f"[error] Failed to load config: {e}")
@@ -983,9 +1047,15 @@ with dpg.window(label="CAM Combiner", width=2500, height=1250):
                 dpg.add_button(label="Choose Output Dir", callback=lambda: dpg.show_item("out_dialog"))
 
             with dpg.group(horizontal=True):
-                dpg.add_text("Session File:")
-                dpg.add_input_text(tag="session_val", readonly=True, width=500)
-                dpg.add_button(label="Load Session", callback=lambda: dpg.show_item("session_dialog"))
+                dpg.add_text("Json Name:  ")
+                dpg.add_input_text(tag="json_name_val", default_value="", width=300,
+                                   callback=_on_json_name_change)
+
+            with dpg.group(horizontal=True):
+                dpg.add_text("Sessions:   ")
+                dpg.add_combo(tag="session_combo", items=[], width=350)
+                dpg.add_button(label="Load", callback=_load_selected_session)
+                dpg.add_button(label="Save", callback=_save_current_session_manual)
 
     dpg.add_separator()
     with dpg.group(horizontal=True, parent="Parameters"):
@@ -1042,9 +1112,15 @@ with dpg.file_dialog(directory_selector=True, show=False, callback=choose_shared
 with dpg.file_dialog(directory_selector=True, show=False, callback=choose_out, tag="out_dialog", width=1000, height=500):
     dpg.add_file_extension(".*")
 
-with dpg.file_dialog(directory_selector=False, show=False, callback=load_session_file, tag="session_dialog", width=1000, height=500):
-    dpg.add_file_extension(".json")
-    dpg.add_file_extension(".*")
+with dpg.window(label="Confirm Overwrite", modal=True, show=False, tag="overwrite_modal",
+                no_resize=True, width=420, height=110, pos=[550, 420]):
+    dpg.add_text("", tag="overwrite_modal_text")
+    dpg.add_spacer(height=8)
+    with dpg.group(horizontal=True):
+        dpg.add_button(label="Overwrite", width=110, callback=_do_overwrite_save)
+        dpg.add_spacer(width=12)
+        dpg.add_button(label="Cancel", width=110,
+                       callback=lambda: dpg.configure_item("overwrite_modal", show=False))
 
 dpg.setup_dearpygui()
 dpg.show_viewport()
