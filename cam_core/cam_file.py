@@ -4,6 +4,8 @@ from cam_core.debug import debug_print
 
 import os
 import re
+import shutil
+import tempfile
 
 # units numbered across X first, then step Y
 class Unit:
@@ -107,6 +109,18 @@ class CAMFile:
         self._toolnum = toolnum
         if self._debug:
             debug_print("     tool: " + str(self._toolnum))
+
+    @classmethod
+    def from_lines(cls, name: str, lines: list, is_root: bool = True) -> "CAMFile":
+        """Construct a CAMFile from in-memory lines without reading from disk."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            path = os.path.join(tmpdir, name)
+            with open(path, "w", encoding="utf-8") as f:
+                f.writelines(lines)
+            return cls(name, tmpdir, is_root)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
     def set_matching_search_string(self, match: str):
         # print(self.name + " setting search string: "+match)

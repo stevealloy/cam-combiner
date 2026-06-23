@@ -3,6 +3,7 @@ import errno
 from cam_core.version import GUI_BANNER, APP_BANNER, VERSION
 from cam_core.jsonc_loader import load_config_file, normalize_legacy
 from cam_core.planner import plan, scan_files
+from cam_core.writer import write_output_file
 from cam_core.debug import debug_dump_all, debug_print
 from cam_core.cam_file import CAMFile
 from cam_core.CAMFeature import CAMFeature
@@ -344,30 +345,6 @@ def generate_output(sender=None, app_data=None, user_data=None):
     write_output_files()
 
 
-
-def write_output_file(cfile, fname, output_file, start_unit: int, num_units: int, mirror: bool, tnum, suppress_end_code: bool, cline: float, cline_delta: float, direction):
-    global CAMFiles, CAMFeatures, FeatureBlocks, CAMTools
-
-    #debug_print("Writing Output File ", fname, "==>", output_file)
-    output_file.write("( BEGIN FILE " + fname + "TNUM: " + str(tnum) + " )\n")
-    status = "( Lefty:" + str(mirror) + " Nunits:" + str(num_units) + " )\n"
-    output_file.write(status)
-    status = "( cline: " + str(cline) + " delta:" + str(cline_delta) + " )\n"
-    output_file.write(status)
-    status = "( start_unit: "+ str(start_unit) + " num_units: " + str(num_units) + ")\n"
-    output_file.write(status)
-
-    outlist = cfile.get_output( mirror,
-                                cline,
-                                cline_delta,
-                                start_unit,
-                                num_units,
-                                direction,
-                                suppress_end_code)
-    for line in outlist:
-        output_file.write(line)
-
-    output_file.write("( END FILE " + fname + " )\n")
 
 
 def write_output_files():

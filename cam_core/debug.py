@@ -1,4 +1,7 @@
-import dearpygui.dearpygui as dpg
+try:
+    import dearpygui.dearpygui as dpg
+except ModuleNotFoundError:
+    dpg = None
 
 def debug_dump_all(base_dir: str,
                    params: dict,
