@@ -4,6 +4,7 @@ from cam_core.version import GUI_BANNER, APP_BANNER, VERSION
 from cam_core.jsonc_loader import load_config_file, normalize_legacy
 from cam_core.planner import plan, scan_files
 from cam_core.writer import write_output_file
+from cam_core.session import save_session, load_session, SESSION_FILENAME
 from cam_core.debug import debug_dump_all, debug_print
 from cam_core.cam_file import CAMFile
 from cam_core.CAMFeature import CAMFeature
@@ -121,7 +122,7 @@ def _refresh_ui(recreate_params: bool):
                      # Label + combo per parameter
                     if state["param_values"][p] == "":
                         dpg.add_checkbox(label=p,
-                                         default_value=False,  # default OFF
+                                         default_value=bool(state["params"].get(p, False)),
                                          callback=_on_param_change,
                                          user_data=p)
                     else:
@@ -343,6 +344,11 @@ def generate_output(sender=None, app_data=None, user_data=None):
         f.create_unit_code(max_units, cline_delta, direction)
 
     write_output_files()
+
+    enabled_names = [f.name for f in CAMFeatures if f.get_enabled()]
+    session_path = save_session(state["output_base"], state, enabled_names)
+    dpg.set_value("session_val", session_path)
+    debug_print(f"[info] Session saved to {session_path}")
 
 
 
@@ -819,6 +825,60 @@ def choose_shared(sender, app_data):
     _refresh_ui(True)
 
 
+def load_session_file(sender, app_data):
+    global CAMFiles, CAMFeatures, FeatureBlocks, CAMTools
+
+    path = app_data["file_path_name"]
+    dpg.set_value("session_val", path)
+
+    try:
+        data = load_session(path)
+    except Exception as e:
+        debug_print(f"[error] Failed to load session: {e}")
+        return
+
+    # Restore directory paths
+    if data.get("base"):
+        state["base"] = data["base"]
+        dpg.set_value("base_val", state["base"])
+    if data.get("output_base"):
+        state["output_base"] = data["output_base"]
+        dpg.set_value("out_val", state["output_base"])
+    state["shared_dir"] = data.get("shared_dir")
+    dpg.set_value("shared_val", state["shared_dir"] or "")
+
+    # Load config — this sets param choice lists and default values, then calls
+    # run_plan() + _refresh_ui(True) internally.  We override params afterwards.
+    if data.get("cfg_path"):
+        set_cfg(data["cfg_path"])
+
+    # Override params with saved values (set_cfg already ran _refresh_ui, so
+    # we update state and trigger a full rebuild with the correct values)
+    state["params"].update(data.get("params", {}))
+
+    # Scan files with restored directories
+    CAMFiles, FeatureBlocks, CAMFeatures, CAMTools = scan_files(
+        state["base"], shared_dir=state["shared_dir"]
+    )
+
+    # Re-enable saved features (scan created fresh CAMFeature objects)
+    saved_features = set(data.get("enabled_features", []))
+    for feat in CAMFeatures:
+        if feat.name in saved_features:
+            feat.set_enabled()
+
+    run_plan()
+    # Rebuild UI with the restored param values and feature states
+    _refresh_ui(True)
+
+    # After _refresh_ui creates fresh checkboxes, tick the enabled ones
+    for feat in CAMFeatures:
+        if feat.get_enabled():
+            dpg.set_value(feat.get_radiobtn(), True)
+
+    debug_print(f"[info] Session loaded from {path}")
+
+
 def set_cfg(path):
     try:
         cfg = normalize_legacy(load_config_file(path))
@@ -913,6 +973,11 @@ with dpg.window(label="CAM Combiner", width=2500, height=1250):
                 dpg.add_input_text(tag="out_val", readonly=True, width=500)
                 dpg.add_button(label="Choose Output Dir", callback=lambda: dpg.show_item("out_dialog"))
 
+            with dpg.group(horizontal=True):
+                dpg.add_text("Session File:")
+                dpg.add_input_text(tag="session_val", readonly=True, width=500)
+                dpg.add_button(label="Load Session", callback=lambda: dpg.show_item("session_dialog"))
+
     dpg.add_separator()
     with dpg.group(horizontal=True, parent="Parameters"):
         cid = dpg.add_checkbox(
@@ -966,6 +1031,10 @@ with dpg.file_dialog(directory_selector=True, show=False, callback=choose_shared
     dpg.add_file_extension(".*")
 
 with dpg.file_dialog(directory_selector=True, show=False, callback=choose_out, tag="out_dialog", width=1000, height=500):
+    dpg.add_file_extension(".*")
+
+with dpg.file_dialog(directory_selector=False, show=False, callback=load_session_file, tag="session_dialog", width=1000, height=500):
+    dpg.add_file_extension(".json")
     dpg.add_file_extension(".*")
 
 dpg.setup_dearpygui()
