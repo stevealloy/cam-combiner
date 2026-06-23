@@ -12,7 +12,7 @@ from cam_core.Tool import Tool
 from cam_core.FeatureBlock import FeatureBlock
 
 import dearpygui.dearpygui as dpg  # type: ignore
-import os, re
+import os, re, shutil
 
 print(GUI_BANNER)
 print("="*40)
@@ -348,7 +348,12 @@ def generate_output(sender=None, app_data=None, user_data=None):
 
     write_output_files()
 
-    _save_session_named(state.get("json_name", ""))
+    json_name = state.get("json_name", "")
+    model_name = str(state["cfg"].get("MODEL", ""))
+    if json_name and json_name != model_name and state.get("output_base"):
+        _copy_root_outputs_to_subdir(json_name)
+
+    _save_session_named(json_name)
 
 
 
@@ -945,6 +950,22 @@ def _save_current_session_manual(sender=None, app_data=None):
 
 def _on_json_name_change(sender, app_data, user_data=None):
     state["json_name"] = app_data
+
+
+def _copy_root_outputs_to_subdir(name: str):
+    """Copy root-level output files to output_base/<name>/."""
+    base = state["output_base"]
+    dest = os.path.join(base, name)
+    os.makedirs(dest, exist_ok=True)
+    for fname in ("summary.txt", "tools.txt"):
+        src = os.path.join(base, fname)
+        if os.path.isfile(src):
+            shutil.copy2(src, os.path.join(dest, fname))
+    for out in state.get("resolved", []):
+        src = os.path.join(base, out["name"])
+        if os.path.isfile(src):
+            shutil.copy2(src, os.path.join(dest, out["name"]))
+    debug_print(f"[info] Root outputs copied to {dest}")
 
 
 def set_cfg(path):
