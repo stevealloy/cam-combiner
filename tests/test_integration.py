@@ -15,6 +15,7 @@ from pathlib import Path
 
 from cam_core.planner import scan_files, plan
 from cam_core.jsonc_loader import load_config_file, normalize_legacy
+from cam_core.session import load_session
 from cam_core.writer import write_output_file
 
 FIXTURES = Path(__file__).parent.parent / "Testing"
@@ -166,8 +167,12 @@ class TestWriteIntegration:
 # under --base-dir (default: Testing/).  Each test runs once per directory.
 # ---------------------------------------------------------------------------
 
-def _load_dir(in_dir: Path):
-    """Return (cfg, default_params, scan_result) for an *-in directory."""
+def _load_dir(in_dir: Path, session_json: Path = None):
+    """Return (cfg, params, scan, enabled_feature_names) for an *-in directory.
+
+    When session_json is supplied its params and enabled_features override the
+    config defaults so the test runs with the same selection as the saved job.
+    """
     cfg = normalize_legacy(load_config_file(str(in_dir / "fixture_config.txt")))
     params = {"Lefty": False, "unit_1_only": False}
     for p in cfg.get("parameters", []):
@@ -177,44 +182,73 @@ def _load_dir(in_dir: Path):
 
     shared = in_dir.parent / "SharedGCode"
     scan = scan_files(str(in_dir), shared_dir=str(shared) if shared.is_dir() else None)
-    return cfg, params, scan
+
+    enabled_names: set = set()
+    if session_json and Path(session_json).exists():
+        data = load_session(str(session_json))
+        params.update(data.get("params", {}))
+        enabled_names = set(data.get("enabled_features", []))
+
+    return cfg, params, scan, enabled_names
+
+
+def _apply_features(scan, enabled_names: set):
+    """Enable features by name; return list of enabled CAMFeature objects."""
+    _, _, features, _ = scan
+    for feat in features:
+        if feat.name in enabled_names:
+            feat.set_enabled()
+    return [feat for feat in features if feat.get_enabled()]
 
 
 class TestMultiDir:
-    """Runs once per *-in directory; in_dir is injected by conftest parametrize."""
+    """Runs once per (in_dir, session_json) pair from conftest parametrize.
 
-    def test_config_loads(self, in_dir):
+    session_json is the path to a *.json saved in the matching *-out directory,
+    or None when no session files exist (tests run with config defaults).
+    """
+
+    def test_config_loads(self, in_dir, session_json):
         cfg = normalize_legacy(load_config_file(str(in_dir / "fixture_config.txt")))
         assert cfg.get("MODEL"), f"{in_dir.name}: config missing MODEL"
         assert "CLINE" in cfg, f"{in_dir.name}: config missing CLINE"
 
-    def test_scan_returns_files(self, in_dir):
-        cfg, params, (files, blocks, features, tools) = _load_dir(in_dir)
+    def test_scan_returns_files(self, in_dir, session_json):
+        cfg, params, scan, _ = _load_dir(in_dir, session_json)
+        files, _, _, _ = scan
         assert len(files) > 0, f"{in_dir.name}: scan returned no files"
 
-    def test_base_block_present(self, in_dir):
-        cfg, params, (files, blocks, features, tools) = _load_dir(in_dir)
+    def test_base_block_present(self, in_dir, session_json):
+        cfg, params, scan, _ = _load_dir(in_dir, session_json)
+        _, blocks, _, _ = scan
         names = [b.name for b in blocks]
         assert "Base" in names, f"{in_dir.name}: no Base block"
 
-    def test_tools_detected(self, in_dir):
-        cfg, params, (files, blocks, features, tools) = _load_dir(in_dir)
+    def test_tools_detected(self, in_dir, session_json):
+        cfg, params, scan, _ = _load_dir(in_dir, session_json)
+        _, _, _, tools = scan
         assert len(tools) > 0, f"{in_dir.name}: no tools detected"
 
-    def test_plan_runs_without_error(self, in_dir):
-        cfg, params, (files, blocks, features, tools) = _load_dir(in_dir)
-        resolved, by_step = plan(cfg, params, files, str(in_dir), blocks, [])
+    def test_plan_runs_without_error(self, in_dir, session_json):
+        cfg, params, scan, enabled_names = _load_dir(in_dir, session_json)
+        files, blocks, _, _ = scan
+        enabled_feats = _apply_features(scan, enabled_names)
+        resolved, by_step = plan(cfg, params, files, str(in_dir), blocks, enabled_feats)
         assert len(resolved) > 0, f"{in_dir.name}: plan returned no outputs"
 
-    def test_plan_selects_at_least_one_file(self, in_dir):
-        cfg, params, (files, blocks, features, tools) = _load_dir(in_dir)
-        _, by_step = plan(cfg, params, files, str(in_dir), blocks, [])
+    def test_plan_selects_at_least_one_file(self, in_dir, session_json):
+        cfg, params, scan, enabled_names = _load_dir(in_dir, session_json)
+        files, blocks, _, _ = scan
+        enabled_feats = _apply_features(scan, enabled_names)
+        _, by_step = plan(cfg, params, files, str(in_dir), blocks, enabled_feats)
         total = sum(len(v) for v in by_step.values())
         assert total > 0, f"{in_dir.name}: plan selected no files at all"
 
-    def test_write_pipeline_runs(self, in_dir):
-        cfg, params, (files, blocks, features, tools) = _load_dir(in_dir)
-        _, by_step = plan(cfg, params, files, str(in_dir), blocks, [])
+    def test_write_pipeline_runs(self, in_dir, session_json):
+        cfg, params, scan, enabled_names = _load_dir(in_dir, session_json)
+        files, blocks, _, _ = scan
+        enabled_feats = _apply_features(scan, enabled_names)
+        _, by_step = plan(cfg, params, files, str(in_dir), blocks, enabled_feats)
 
         cline       = cfg["CLINE"]
         cline_delta = float(cfg["CLINE_DELTA"])
