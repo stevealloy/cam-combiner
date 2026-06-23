@@ -169,6 +169,7 @@ class CAMFile:
                          clinedelta: float,
                          direction):
 
+        self._output = []
         for i in range(0, numUnits):
             self._output.append([])
 

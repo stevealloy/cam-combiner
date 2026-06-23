@@ -16,7 +16,7 @@ class FeatureBlock:
     def get_CAM_features(self):
         return self.features
 
-    def add_CAM_file(self, cft: CAMFeature):
+    def add_CAM_file(self, cft):
         self.CAM_features.append(cft)
 
     def get_CAM_files(self):

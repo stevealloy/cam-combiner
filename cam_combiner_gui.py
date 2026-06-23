@@ -240,8 +240,7 @@ def _refresh_ui(recreate_params: bool):
                     feat_name = f.get_feature_name()
                     for ft in CAMFeatures:
                         if ft.name == feat_name:
-                            if ft.get_enabled():
-                                feat_color = enabled_feature_color
+                            feat_color = enabled_feature_color if ft.get_enabled() else (255, 255, 255, 255)
                             break
 
                 with dpg.table_row():
@@ -546,12 +545,12 @@ def write_output_files():
 
                     if _is_file_enabled(t2file):
                         have_error = True
-                        t.set_error(True)
-                        t2.set_error(True)
+                        t.set_error("conflict")
+                        t2.set_error("conflict")
                     else:
                         have_warning = True
-                        t.set_warning(True)
-                        t2.set_warning(True)
+                        t.set_warning("conflict")
+                        t2.set_warning("conflict")
 
     if 0:
         if have_warning:
@@ -593,9 +592,6 @@ def write_output_files():
             continue
 
         output_file = open(base_output_dir + "/" + out["name"], "w")
-        if not output_file:
-            print("FATAL ERROR CAN NOT OPEN OUTPUT FILE: ", out["name"])
-            dpg.destroy_context()
 
         output_file_ind_unit = []
         for unit in range(0, units_to_produce):
@@ -603,9 +599,6 @@ def write_output_files():
             newfile = open(unit_fn, "w")
             if debug_wof:
                 print("...opening unit output file: ", unit_fn, "result: ", newfile)
-            if not newfile:
-                print("FATAL ERROR CAN NOT OPEN OUTPUT FILE: ", outputs[stepnum], " for unit " + str(unit))
-                dpg.destroy_context()
             output_file_ind_unit.append(newfile)
 
         output_file_1toN = []
@@ -697,6 +690,7 @@ def write_output_files():
                                   suppress_end_code,
                                   cline, cline_delta, direction)
 
+        output_file.close()
         for unit in range(0, units_to_produce):
             output_file_ind_unit[unit].close()
         for n_file in output_file_1toN:
@@ -1002,9 +996,9 @@ def set_cfg(path):
         if "DIRECTION" not in cfg:
             debug_print("***********************error: config file doesn't set DIRECTION")
             state["cfg"]["DIRECTION"] = "HORIZONTAL"
-        if "DIRECTION" not in cfg:
-            debug_print("***********************error: config file doesn't set DIRECTION")
-            state["cfg"]["DIRECTION"] = "HORIZONTAL"
+        if "NUM-STEPS" not in cfg:
+            debug_print("***********************error: config file doesn't set NUM-STEPS")
+            state["cfg"]["NUM-STEPS"] = len(cfg.get("OUTPUT-FILE-NAMES", []))
 
         dpg.set_value("cfg_val", path)
         model = cfg.get("MODEL", "")

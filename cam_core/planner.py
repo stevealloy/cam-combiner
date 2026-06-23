@@ -163,11 +163,11 @@ def _scan_files_int(base_dir: str, include_ext: Tuple[str,...]=(".nc",), block_p
                         got_one = True
                         if t.get_desc() == tool.get_desc():
                             # same #, same description. add new file to old tool
-                            t.add_file(entry)
+                            t.add_file(newfile)
                         else:
                             # t # match, but descp fail. ERROR!
                             t.set_error("file " + entry.name + " reused tool #" + str(t.get_tool_num()) + " new descr: "+tool.get_desc())
-                            t.add_file(entry)
+                            t.add_file(newfile)
                         break
                 if not got_one:
                     # add new tool to our array of tools

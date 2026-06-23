@@ -57,9 +57,6 @@ def load_config_text(text: str, source_hint: str = "") -> Dict[str, Any]:
 def load_config_file(path: str) -> Dict[str, Any]:
     with open(path, "r", encoding="utf-8") as f:
         txt = f.read()
-    if not f:
-        return {}
-
     return load_config_text(txt, path)
 
 def normalize_legacy(cfg: Dict[str, Any]) -> Dict[str, Any]:

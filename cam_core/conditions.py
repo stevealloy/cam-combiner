@@ -48,6 +48,25 @@ def eval_condition(expr: str, params: Dict[str, Any]) -> bool:
                 out.append(seq[i]); i += 1
         return out
     seq = reduce_nots(values)
+    def reduce_eq(seq):
+        while True:
+            out = []
+            i = 0
+            changed = False
+            while i < len(seq):
+                if i + 2 < len(seq) and seq[i + 1] == "==":
+                    a = (seq[i] == "True")
+                    b = (seq[i + 2] == "True")
+                    out.append("True" if (a == b) else "False")
+                    i += 3
+                    changed = True
+                else:
+                    out.append(seq[i]); i += 1
+            seq = out
+            if not changed:
+                break
+        return seq
+    seq = reduce_eq(seq)
     def reduce_and(seq):
         while True:
             out = []
