@@ -4,7 +4,7 @@ from cam_core.version import GUI_BANNER, APP_BANNER, VERSION
 from cam_core.jsonc_loader import load_config_file, normalize_legacy
 from cam_core.planner import plan, scan_files
 from cam_core.writer import write_output_file
-from cam_core.session import save_session, load_session, SESSION_FILENAME
+from cam_core.session import save_session, load_session
 from cam_core.debug import debug_dump_all, debug_print
 from cam_core.cam_file import CAMFile
 from cam_core.CAMFeature import CAMFeature
