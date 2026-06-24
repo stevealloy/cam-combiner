@@ -226,8 +226,8 @@ def _refresh_ui(recreate_params: bool):
                 step = str(f.get_step())
                 feat_name = ""
                 rule_match = ""
-                if f._dir == state["base"]:
-                    # Root directory files. if params are active: param color else root color
+                if f.is_root():
+                    # Root directory files (project root or shared root). if params are active: param color else root color
                     if "INPUT-FILE-NAME-BASES" in state["cfg"]:
                         # param based
                         txt_color = param_based_color

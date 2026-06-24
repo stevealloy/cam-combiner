@@ -155,6 +155,9 @@ class CAMFile:
     def get_feature_name(self):
         return self._feature_name
 
+    def is_root(self) -> bool:
+        return self._is_root
+
     def get_step(self) -> str:
         return self._step
 
