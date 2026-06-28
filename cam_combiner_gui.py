@@ -690,6 +690,17 @@ def write_output_files():
                                   suppress_end_code,
                                   cline, cline_delta, direction)
 
+        step_files = by_step[stepnum]
+        if len(step_files) > 1:
+            first_tnum = next((f.get_toolnum() for f in step_files if f.get_toolnum() and f.get_toolnum() != 0), None)
+            if first_tnum:
+                tool_reload = f"T{int(first_tnum):02d}\n"
+                output_file.write(tool_reload)
+                for uf in output_file_ind_unit:
+                    uf.write(tool_reload)
+                for nf in output_file_1toN:
+                    nf.write(tool_reload)
+
         output_file.close()
         for unit in range(0, units_to_produce):
             output_file_ind_unit[unit].close()
@@ -727,7 +738,7 @@ def write_output_files():
         # but is still necessary since it is output in comments into the file
         current_tool_num = cfile.get_toolnum()
 
-        # do not suppress end code since files are intended to be run independently
+        # do not suppress end code since files are intended to   be run independently
         suppress_end_code = False
 
         if debug_wof:

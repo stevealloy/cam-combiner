@@ -245,6 +245,11 @@ def _generate_step_output(step_files: list, cfg: dict, params: dict) -> str:
         write_output_file(f, f.name, buf, 1, num_units, mirror,
                           current_tnum, suppress, cline, cline_delta, direction)
 
+    if len(step_files) > 1:
+        first_tnum = next((f.get_toolnum() for f in step_files if f.get_toolnum() and f.get_toolnum() != 0), None)
+        if first_tnum:
+            buf.write(f"T{int(first_tnum):02d}\n")
+
     return buf.getvalue()
 
 
