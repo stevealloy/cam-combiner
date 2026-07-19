@@ -11,3 +11,4 @@ venv/
 *.iml
 Testing/sstyle-out/
 Testing/Fingerboards-out/
+Testing/T-out/

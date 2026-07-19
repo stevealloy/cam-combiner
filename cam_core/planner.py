@@ -22,9 +22,8 @@ def _param_lookup(parameters: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]
 def _render_pattern(name: str, params: Dict[str, Any], pmap: Dict[str, Dict[str, Any]]) -> List[Tuple[str, str]]:
     tokens = re.findall(r"<([A-Za-z_]\w*)(?::(lower|upper))?>", name)
 
-    # build the "exact" version
-    exact = name
     token_values = {}
+    token_wildcards = {}
     for t, case in tokens:
         v = params.get(t, "")
         if isinstance(v, bool):
@@ -35,23 +34,28 @@ def _render_pattern(name: str, params: Dict[str, Any], pmap: Dict[str, Dict[str,
         elif case == "upper":
             v = v.upper()
         token_values[t] = v
-        exact = exact.replace(f"<{t}" + (f":{case}>" if case else ">"), v)
+        token_wildcards[t] = pmap.get(t, {}).get("wildcard")
 
+    def _render(wc_set: set) -> str:
+        # Substitute each placeholder positionally from the original template so that
+        # two tokens sharing the same runtime value don't corrupt each other's position.
+        result = name
+        for t, case in tokens:
+            placeholder = f"<{t}" + (f":{case}>" if case else ">")
+            replacement = token_wildcards[t] if (t in wc_set and token_wildcards.get(t)) else token_values[t]
+            result = result.replace(placeholder, replacement)
+        return result
+
+    exact = _render(set())
     attempts = [(exact, "exact")]
 
     # generate wildcard substitutions for all combinations
-    n = len(tokens)
-    for r in range(1, n+1):  # 1 token → all tokens
-        for combo in itertools.combinations([t for t, _ in tokens], r):
-            candidate = exact
-            labels = []
-            for t in combo:
-                wc = pmap.get(t, {}).get("wildcard")
-                if wc:
-                    candidate = candidate.replace(token_values[t], wc)
-                    labels.append(t)
-            if labels:  # only add if at least one token had a wildcard
-                attempts.append((candidate, f"wildcard({','.join(labels)})"))
+    token_names = [t for t, _ in tokens]
+    for r in range(1, len(token_names) + 1):
+        for combo in itertools.combinations(token_names, r):
+            labels = [t for t in combo if token_wildcards.get(t)]
+            if labels:
+                attempts.append((_render(set(combo)), f"wildcard({','.join(labels)})"))
 
     return attempts
 
@@ -301,6 +305,17 @@ def plan(cfg: Dict[str, Any],
 
     if req_missing:
         debug_print("[warn] required base patterns missing:" + ", ".join(req_missing))
+
+    # Handedness filter: applied universally after all file selection.
+    # Lefty=True  → keep files with -lefty or neither; drop -righty
+    # Lefty=False → keep files with -righty or neither; drop -lefty
+    _lefty = bool(params.get("Lefty", False))
+    for _step in list(selected_by_step):
+        selected_by_step[_step] = [
+            f for f in selected_by_step[_step]
+            if not (re.search(r'-lefty(?:[-.]|$)', f.name, re.IGNORECASE) and not _lefty)
+            and not (re.search(r'-righty(?:[-.]|$)', f.name, re.IGNORECASE) and _lefty)
+        ]
 
     featbool = {}
     firstbool = {}

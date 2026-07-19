@@ -1,0 +1,36 @@
+{
+    "MODEL":"T-style", // no slashes in name
+
+    // FIXTURE DEFINITION
+    "CLINE":10.733,
+    "CLINE_DELTA":14.5,
+    "MAXUNITS":3,
+    "DIRECTION":"HORIZONTAL", // Dir of duplication: HORIZONTAL==x axis (bodies) or VERTICAL==y axis (fingerboards)
+
+    "HasStartAndEnd":"True", // for stages 7 and 9, this determines if the -start and -end are used to distinguish CAM that goes before Features from CAM taht goes after Features are inserted
+    "NUM-STEPS":12,
+    "FRONT-STEP":"10",
+    "BACK-STEP":"08",
+
+    "OUTPUT-FILE-NAMES": [
+            "00-front-up-pins-only-for-back-binding.nc",
+            "01-back-up-rear-binding.nc",	// mill + remill. "top" z is 1.9
+            "02-bunused.nc",	// face to 1.9, pins
+            "03-front-up-blank-prep.nc",	// face to 1.8, pins
+            "04-back-up-lam-prep-back.nc",	// face to 0.3, lam pins
+            "05-pre-lam-facing-top-up.nc",	// face to 1.5 + chambering+wire runs+lam pins; glue up
+            "06-binding-mill-top-up.nc",	// mill + remill. "top" z is 1.75
+            "07-front-facing-top-up.nc",	// face to 1.75, pins
+            "08-back.nc",
+            "09-platform-jack-routing.nc",
+            "10-front.nc",
+            "11-final-profiles-front-up.nc"
+    ],
+
+    // Defaults
+    "LEFTY":"False",
+    "NUMUNITS":3,
+
+    "unused":"foobar" // all prior lines need trailing comman
+
+}

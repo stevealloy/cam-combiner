@@ -1,7 +1,18 @@
 {
   "permissions": {
     "allow": [
-      "PowerShell(Get-ChildItem -Path \"G:\\\\Shared drives\\\\AlloyProjectFiles\\\\Customer CAD files\\\\Alloy-Standard-Builds-CAM\\\\PycharmProjects\\\\CC2\" -Recurse -File | Where-Object { $_.Extension -match '\\\\.\\(py|json|yaml|yml|txt|cfg|ini|toml|md\\)$' } | Select-Object FullName | Format-Table -AutoSize)"
+      "PowerShell(Get-ChildItem -Path \"G:\\\\Shared drives\\\\AlloyProjectFiles\\\\Customer CAD files\\\\Alloy-Standard-Builds-CAM\\\\PycharmProjects\\\\CC2\" -Recurse -File | Where-Object { $_.Extension -match '\\\\.\\(py|json|yaml|yml|txt|cfg|ini|toml|md\\)$' } | Select-Object FullName | Format-Table -AutoSize)",
+      "Bash(git -C \"G:\\\\Shared drives\\\\AlloyProjectFiles\\\\Customer CAD files\\\\Alloy-Standard-Builds-CAM\\\\PycharmProjects\\\\CC2\" add cam_combiner_gui.py cam_core/cam_file.py)",
+      "Bash(git -C 'G:\\\\Shared drives\\\\AlloyProjectFiles\\\\Customer CAD files\\\\Alloy-Standard-Builds-CAM\\\\PycharmProjects\\\\CC2' commit -m ' *)",
+      "Bash(git *)",
+      "Bash(python -m pytest tests/ -v)",
+      "Bash(python -m pytest tests/ -q)",
+      "Bash(Select-Object -First 20)",
+      "Bash(Get-ChildItem Testing/Fingerboards-in/ -Directory)",
+      "Bash(Select-Object Name)",
+      "PowerShell(Get-Process *)",
+      "Bash(git commit *)",
+      "Read(//tmp/**)"
     ]
   }
 }

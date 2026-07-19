@@ -291,28 +291,20 @@ def run_plan(sender=None, app_data=None, user_data=None):
 
 
     # List the planned file outputs to the "Outputs" window
-    header = ""
-    header += "Step "
-    header += "Out Name                           "
-    header += "CAM Files Included"
-    parts = header + "\n"
+    dpg.delete_item("Outputs_table", children_only=True, slot=1)
+    parts = ""
     for out in resolved:
         step = str(out.get("step", ""))
         name = out.get("name", "")
-
-        parts += f"{step:02}   "
-        parts += f"{name:35s}"
         step_files = by_step.get(step, [])
-        if not step_files:
-            parts += "\n"
-            continue
-        comma=''
-        for f in step_files:
-            parts += comma + f.name
-            comma = '    '
-        parts += "\n"
-
-    dpg.set_value("Outputs", parts)
+        files_str = "\n".join(f.name for f in step_files)
+        files_height = max(26, len(step_files) * 19 + 6)
+        with dpg.table_row(parent="Outputs_table"):
+            dpg.add_text(f"{step:02}")
+            dpg.add_input_text(default_value=name, readonly=True, width=-1)
+            dpg.add_input_text(default_value=files_str, readonly=True, multiline=True,
+                               width=-1, height=files_height)
+        parts += f"{step:02}   {name:35s}{files_str}\n"
     debug_print(parts)
 
     state["resolved"] = resolved
@@ -350,7 +342,8 @@ def generate_output(sender=None, app_data=None, user_data=None):
     json_name = dpg.get_value("json_name_val").strip()
     state["json_name"] = json_name
     model_name = str(state["cfg"].get("MODEL", ""))
-    if json_name and json_name != model_name and state.get("output_base"):
+    output_basename = os.path.basename(state.get("output_base", ""))
+    if json_name and json_name != model_name and state.get("output_base") and output_basename != json_name:
         _copy_root_outputs_to_subdir(json_name)
 
     _save_session_named(json_name)
@@ -781,6 +774,11 @@ def choose_out(sender, app_data):
     state["output_base"] = app_data["file_path_name"]
     dpg.set_value("out_val", state["output_base"])
 
+    json_name = os.path.basename(state["output_base"])
+    state["json_name"] = json_name
+    if dpg.does_item_exist("json_name_val"):
+        dpg.set_value("json_name_val", json_name)
+
     # Auto-select config in base (unchanged behavior)
     cfg_path = os.path.join(state["output_base"], "fixture_config.txt")
     set_cfg(cfg_path)
@@ -1108,7 +1106,7 @@ with dpg.window(label="CAM Combiner", width=2500, height=1250):
 
     dpg.add_separator()
 
-    with dpg.group(horizontal=True, height=750):
+    with dpg.group(horizontal=True, height=700):
         with dpg.child_window(width=350, border=True):
             dpg.add_text("Features", color=feature_based_color)
             dpg.add_group(tag="features_box")  # populated dynamically
@@ -1128,10 +1126,15 @@ with dpg.window(label="CAM Combiner", width=2500, height=1250):
             dpg.add_group(tag="tools")  # populated dynamically
 
     dpg.add_separator()
-    dpg.add_input_text(tag="Outputs", multiline=True, height=200)
+    with dpg.child_window(tag="Outputs_window", border=True, height=225, width=2450):
+        with dpg.table(tag="Outputs_table", header_row=True,
+                       borders_innerH=True, borders_innerV=True, borders_outerV=True, borders_outerH=True):
+            dpg.add_table_column(label="Step", width_fixed=True, init_width_or_weight=45)
+            dpg.add_table_column(label="Out Name", width_fixed=True, init_width_or_weight=270)
+            dpg.add_table_column(label="CAM Files Included", width_stretch=True)
     dpg.add_separator()
-    with dpg.child_window(tag="Log_window", border=True):
-        dpg.add_input_text(tag="Log", multiline=True, height=200)
+    with dpg.child_window(tag="Log_window", border=True, height=100, width=2450, horizontal_scrollbar=True):
+        dpg.add_input_text(tag="Log", multiline=True, width=2400)
 
 with dpg.file_dialog(directory_selector=True, show=False, callback=choose_base, tag="base_dialog", width=1000, height=500):
     dpg.add_file_extension(".*")
