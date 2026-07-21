@@ -90,8 +90,14 @@ python cam_combiner_gui.py
    saves a session JSON (see [§8](#8-sessions)). The button disables itself
    and an amber "Working: \<stage\>..." indicator appears beside it while
    this runs (stages: computing unit code, writing output files, zipping
-   subdirectories if enabled, copying archive files if the json name
-   differs, saving session), clearing once it's done.
+   subdirectories or copying unit folders to the output directory,
+   copying archive files if the json name differs, saving session),
+   clearing once it's done. The `1/`, `2/`, `1to2/`, ... trees (§9) are
+   built in a local temp folder first and only zipped/copied into the
+   output directory once complete — if the output directory is a
+   Drive-synced path, this avoids round-tripping every individual file
+   through it, since most of what's written there ends up zipped and
+   the source folder deleted anyway.
 6. **Sessions** — save/load a named JSON snapshot of the current
    directories/parameters/features via the dropdown + Load/Save buttons.
 

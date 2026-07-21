@@ -12,7 +12,7 @@ from cam_core.Tool import Tool
 from cam_core.FeatureBlock import FeatureBlock
 
 import dearpygui.dearpygui as dpg  # type: ignore
-import os, re, shutil
+import os, re, shutil, tempfile
 
 print(GUI_BANNER)
 print("="*40)
@@ -31,6 +31,7 @@ state = {
     "param_values": {},         # dynamic value of string to use in gui for choices
     "shared_dir": None,
     "json_name": "",            # stem of the session JSON file (no extension)
+    "_unit_tmp_dir": None,      # local scratch dir holding 1/, 1toN/, ... while being built
 }
 
 param_based_color = (255, 0, 0, 255)  # red
@@ -372,8 +373,16 @@ def run_plan(sender=None, app_data=None, user_data=None):
     state["by_step"] = by_step
 
 
+def _cleanup_unit_tmp_dir():
+    tmp = state.get("_unit_tmp_dir")
+    if tmp:
+        shutil.rmtree(tmp, ignore_errors=True)
+        state["_unit_tmp_dir"] = None
+
+
 def _generate_output_failed(exc: Exception):
     debug_print(f"[error] Generate Output failed: {exc}")
+    _cleanup_unit_tmp_dir()
     _set_status("")
     dpg.configure_item("generate_output_btn", enabled=True)
 
@@ -412,18 +421,24 @@ def _generate_output_stage_write(sender=None, app_data=None, user_data=None):
 
         if state["params"].get("zip_subdirs"):
             _set_status("Zipping subdirectories")
-            dpg.set_frame_callback(dpg.get_frame_count() + 2, _generate_output_stage_zip)
         else:
-            _generate_output_stage_finish()
+            _set_status("Copying unit folders to output directory")
+        dpg.set_frame_callback(dpg.get_frame_count() + 2, _generate_output_stage_finalize_units)
     except Exception as e:
         _generate_output_failed(e)
 
 
-def _generate_output_stage_zip(sender=None, app_data=None, user_data=None):
+def _generate_output_stage_finalize_units(sender=None, app_data=None, user_data=None):
     try:
         max_units = state["cfg"]["MAXUNITS"]
         units_to_produce = 1 if state["params"]["unit_1_only"] else max_units
-        _zip_and_remove_unit_subdirs(state["output_base"], units_to_produce)
+        unit_tmp_dir = state.get("_unit_tmp_dir")
+        if unit_tmp_dir:
+            if state["params"].get("zip_subdirs"):
+                _zip_unit_subdirs(unit_tmp_dir, state["output_base"], units_to_produce)
+            else:
+                _copy_unit_subdirs(unit_tmp_dir, state["output_base"], units_to_produce)
+            _cleanup_unit_tmp_dir()
         _generate_output_stage_finish()
     except Exception as e:
         _generate_output_failed(e)
@@ -450,20 +465,34 @@ def _generate_output_stage_finish():
 
 
 
-def _zip_and_remove_unit_subdirs(base_output_dir, units_to_produce):
-    """Zip each per-unit/1toN output subdir into <name>.zip, then remove it."""
+def _unit_subdir_names(units_to_produce):
     names = [str(u) for u in range(1, units_to_produce + 1)]
     names += ["1to" + str(n) for n in range(2, units_to_produce + 1)]
+    return names
 
-    for name in names:
-        subdir = os.path.join(base_output_dir, name)
+
+def _zip_unit_subdirs(src_dir, dest_dir, units_to_produce):
+    """Zip each per-unit/1toN subdir straight from src_dir into <name>.zip in dest_dir."""
+    for name in _unit_subdir_names(units_to_produce):
+        subdir = os.path.join(src_dir, name)
         if not os.path.isdir(subdir):
             continue
-        zip_base = os.path.join(base_output_dir, name)
+        zip_base = os.path.join(dest_dir, name)
         if os.path.exists(zip_base + ".zip"):
             os.remove(zip_base + ".zip")
         shutil.make_archive(zip_base, "zip", subdir)
-        shutil.rmtree(subdir)
+
+
+def _copy_unit_subdirs(src_dir, dest_dir, units_to_produce):
+    """Copy each per-unit/1toN subdir tree from src_dir into dest_dir."""
+    for name in _unit_subdir_names(units_to_produce):
+        subdir = os.path.join(src_dir, name)
+        if not os.path.isdir(subdir):
+            continue
+        dest = os.path.join(dest_dir, name)
+        if os.path.isdir(dest):
+            shutil.rmtree(dest)
+        shutil.copytree(subdir, dest)
 
 
 def write_output_files():
@@ -488,27 +517,33 @@ def write_output_files():
     num_steps = state["cfg"]["NUM-STEPS"]
     output_file_names = state["cfg"]["OUTPUT-FILE-NAMES"]
 
+    # 1/, 2/, ..., 1to2/, ... are built on local disk and only copied/zipped to
+    # base_output_dir once complete, so filling them doesn't round-trip every
+    # single file through a Drive-synced output directory.
+    unit_out_dir = tempfile.mkdtemp(prefix="camcombiner_units_")
+    state["_unit_tmp_dir"] = unit_out_dir
+
     # create output directories
     if debug_wof:
         debug_print("*************** creating output directories")
     for unitnum in range(1, units_to_produce + 1):
         # create output directories
         if debug_wof:
-            debug_print("making " + base_output_dir + "/" + str(unitnum))
+            debug_print("making " + unit_out_dir + "/" + str(unitnum))
         try:
-            os.makedirs(base_output_dir + "/" + str(unitnum) + "/IndFiles", True)
+            os.makedirs(unit_out_dir + "/" + str(unitnum) + "/IndFiles", True)
         except OSError as error:
             if error.errno != errno.EEXIST:
-                debug_print("FATAL ERROR: can't create directory: ", base_output_dir + "/" + str(unitnum) + " ERROR: " + str(error) )
+                debug_print("FATAL ERROR: can't create directory: ", unit_out_dir + "/" + str(unitnum) + " ERROR: " + str(error) )
                 dpg.destroy_context()
 
     for unitnum in range(2, units_to_produce + 1):
         # create output directories
         try:
-            os.makedirs(base_output_dir + "/1to" + str(unitnum) + "/IndFiles", True)
+            os.makedirs(unit_out_dir + "/1to" + str(unitnum) + "/IndFiles", True)
         except OSError as error:
             if error.errno != errno.EEXIST:
-                debug_print("FATAL ERROR: can't create directory: ", base_output_dir + "/1to" + str(unitnum) + "/IndFiles ==> ERROR: " + str(error) )
+                debug_print("FATAL ERROR: can't create directory: ", unit_out_dir + "/1to" + str(unitnum) + "/IndFiles ==> ERROR: " + str(error) )
                 dpg.destroy_context()
 
     # *************************************************************************************************
@@ -703,7 +738,7 @@ def write_output_files():
 
         output_file_ind_unit = []
         for unit in range(0, units_to_produce):
-            unit_fn = base_output_dir + "/" + str(unit+1) + "/" + out["name"]
+            unit_fn = unit_out_dir + "/" + str(unit+1) + "/" + out["name"]
             newfile = open(unit_fn, "w")
             if debug_wof:
                 print("...opening unit output file: ", unit_fn, "result: ", newfile)
@@ -711,7 +746,7 @@ def write_output_files():
 
         output_file_1toN = []
         for n in range(2, units_to_produce + 1):
-            fn = base_output_dir + "/1to" + str(n) + "/" + out["name"]
+            fn = unit_out_dir + "/1to" + str(n) + "/" + out["name"]
             output_file_1toN.append(open(fn, "w"))
 
         lastf = None
@@ -767,7 +802,7 @@ def write_output_files():
             if numUnits == 1:
                 # output this file only in the unit 1 output
                 if debug_wof:
-                    print("*************** write_output_files ind units " + f.name + " to " + base_output_dir + "/1/" + out["name"])
+                    print("*************** write_output_files ind units " + f.name + " to " + unit_out_dir + "/1/" + out["name"])
                 write_output_file(f, f.name, output_file_ind_unit[0],
                             1, 1,
                             mirror_active,
@@ -778,7 +813,7 @@ def write_output_files():
                 for unit in range (0, units_to_produce):
                     # output this file for each unit
                     if debug_wof:
-                        print("*************** write_output_files ind units " + f.name + " to " + base_output_dir + "/" + str(unit) + "/" + out["name"])
+                        print("*************** write_output_files ind units " + f.name + " to " + unit_out_dir + "/" + str(unit) + "/" + out["name"])
                     write_output_file(f,
                                       f.name,
                                       output_file_ind_unit[unit],
@@ -822,7 +857,7 @@ def write_output_files():
         # output individual files for each unit, appropriately mirrored if lefty
         fname = cfile.name
         for i in range(1, units_to_produce + 1):
-            ofname = base_output_dir + "/" + str(i) + "/IndFiles/" + fname
+            ofname = unit_out_dir + "/" + str(i) + "/IndFiles/" + fname
             if re.search("-NODUP", fname):
                 if i == 1:
                     if debug_wof:
@@ -855,7 +890,7 @@ def write_output_files():
         for i in range(2, units_to_produce + 1):
             fname = cfile.name
 
-            ofname = base_output_dir + "/1to" + str(i) + "/IndFiles/" + fname
+            ofname = unit_out_dir + "/1to" + str(i) + "/IndFiles/" + fname
             if re.search("-NODUP", fname):
                 # no duplication, displacement, mirroring for this one.
                 if debug_wof:
@@ -1160,32 +1195,32 @@ with dpg.window(label="CAM Combiner", width=2280, height=1200):
     with dpg.group(horizontal=True):
         with dpg.group(horizontal=False):
             with dpg.group(horizontal=True):
-                dpg.add_text("Base Directory:")
-                dpg.add_input_text(tag="base_val", readonly=True, width=600)
+                dpg.add_text(f"{'Base Directory:':<20}")
+                dpg.add_input_text(tag="base_val", readonly=True, width=900)
                 dpg.add_button(label="Choose Base", callback=lambda: dpg.show_item("base_dialog"))
 
             with dpg.group(horizontal=True):
-                dpg.add_text("Config File:")
-                dpg.add_input_text(tag="cfg_val", readonly=True, width=600)
+                dpg.add_text(f"{'Config File:':<20}")
+                dpg.add_input_text(tag="cfg_val", readonly=True, width=900)
                 dpg.add_button(label="Choose Config", callback=lambda: dpg.show_item("cfg_dialog"))
 
             with dpg.group(horizontal=True):
-                dpg.add_text("Shared GCode Dir:")
-                dpg.add_input_text(tag="shared_val", readonly=True, width=600)
+                dpg.add_text(f"{'Shared GCode Dir:':<20}")
+                dpg.add_input_text(tag="shared_val", readonly=True, width=900)
                 dpg.add_button(label="Choose Shared Dir", callback=lambda: dpg.show_item("shared_dialog"))
 
             with dpg.group(horizontal=True):
-                dpg.add_text("Output Director:")
-                dpg.add_input_text(tag="out_val", readonly=True, width=600)
+                dpg.add_text(f"{'Output Director:':<20}")
+                dpg.add_input_text(tag="out_val", readonly=True, width=900)
                 dpg.add_button(label="Choose Output Dir", callback=lambda: dpg.show_item("out_dialog"))
 
             with dpg.group(horizontal=True):
-                dpg.add_text("Json Name:  ")
+                dpg.add_text(f"{'Json Name:':<20}")
                 dpg.add_input_text(tag="json_name_val", default_value="", width=360,
                                    callback=_on_json_name_change)
 
             with dpg.group(horizontal=True):
-                dpg.add_text("Sessions:   ")
+                dpg.add_text(f"{'Sessions:':<20}")
                 dpg.add_combo(tag="session_combo", items=[], width=420)
                 dpg.add_button(label="Load", callback=_load_selected_session)
                 dpg.add_button(label="Save", callback=_save_current_session_manual)
