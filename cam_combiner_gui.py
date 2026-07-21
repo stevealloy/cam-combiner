@@ -20,7 +20,7 @@ print(APP_BANNER)
 print("="*40)
 
 dpg.create_context()
-dpg.create_viewport(title=f"CAM Combiner {VERSION}", width=2500, height=1250)
+dpg.create_viewport(title=f"CAM Combiner {VERSION}", width=2304, height=1248)
 
 state = {
     "base": os.getcwd(),
@@ -88,9 +88,9 @@ def _is_file_enabled(file_target: CAMFile)->bool:
 
 
 def _add_unmatched_name_text(name: str, spans):
-    """Render name gray with only the given (start,end) char spans in orange."""
+    # Gray with only the given (start,end) spans in orange; selectable unless there's a span (input_text can't mix colors in one widget).
     if not spans:
-        dpg.add_text(name, color=unmatched_color)
+        _add_selectable_text(name, color=unmatched_color)
         return
     with dpg.group(horizontal=True, horizontal_spacing=0):
         pos = 0
@@ -101,6 +101,28 @@ def _add_unmatched_name_text(name: str, spans):
             pos = end
         if pos < len(name):
             dpg.add_text(name[pos:], color=unmatched_color)
+
+
+_text_themes = {}  # color -> bound theme, memoized so we don't rebuild identical themes per cell
+
+
+def _text_theme(color):
+    # Only override the text color -- a transparent FrameBg/Border here previously broke selection/copy on readonly input_text.
+    if color not in _text_themes:
+        with dpg.theme() as theme:
+            with dpg.theme_component(dpg.mvInputText):
+                dpg.add_theme_color(dpg.mvThemeCol_Text, color)
+                dpg.add_theme_color(dpg.mvThemeCol_TextDisabled, color)
+        _text_themes[color] = theme
+    return _text_themes[color]
+
+
+def _add_selectable_text(text: str, color=None, width=-1, multiline=False, height=0):
+    """A readonly input_text styled to look like plain text -- selectable/copyable, unlike add_text."""
+    item = dpg.add_input_text(default_value=text, readonly=True, width=width, multiline=multiline, height=height)
+    if color is not None:
+        dpg.bind_item_theme(item, _text_theme(color))
+    return item
 
 
 def _set_status(stage: str):
@@ -158,7 +180,7 @@ def _refresh_ui(recreate_params: bool):
                             tag=f"param_{p}",
                             items=state["param_values"][p],
                             default_value=state["params"][p],
-                            width=200,
+                            width=240,
                             callback=_on_param_change,
                             user_data=p
                         )
@@ -188,19 +210,23 @@ def _refresh_ui(recreate_params: bool):
 
     # Mirror a readable dump of params in the Options text box (handy for copy/paste)
     with dpg.group(parent="Options"):
-        dpg.add_text("Chosen Parameters:\n")
-        for k, v in sorted(state["params"].items()):
-            line = f"{k:20s} = {v}"
-            dpg.add_text(line)
+        dpg.add_text("Chosen Parameters:")
+        chosen_lines = [f"{k:20s} = {v}" for k, v in sorted(state["params"].items())]
+        dpg.add_input_text(default_value="\n".join(chosen_lines), multiline=True, readonly=True,
+                           width=-1, height=192)
 
     # update_model_params:
     with dpg.group(parent="model_params"):
         dpg.add_text("Model And Fixture Parameters:")
-        dpg.add_text("   Model       = " + str(state["cfg"]["MODEL"]))
-        dpg.add_text("   Center Line = " + str(state["cfg"]["CLINE"]))
-        dpg.add_text("   CL-to-CL    = " + str(state["cfg"]["CLINE_DELTA"]))
-        dpg.add_text("   Max Units   = " + str(state["cfg"]["MAXUNITS"]))
-        dpg.add_text("   Direction   = " + str(state["cfg"]["DIRECTION"]))
+        model_lines = [
+            "   Model       = " + str(state["cfg"]["MODEL"]),
+            "   Center Line = " + str(state["cfg"]["CLINE"]),
+            "   CL-to-CL    = " + str(state["cfg"]["CLINE_DELTA"]),
+            "   Max Units   = " + str(state["cfg"]["MAXUNITS"]),
+            "   Direction   = " + str(state["cfg"]["DIRECTION"]),
+        ]
+        dpg.add_input_text(default_value="\n".join(model_lines), multiline=True, readonly=True,
+                           width=-1, height=96)
 
     with (dpg.group(parent="tools")):
         # Only available if scrollX/scrollY are disabled and stretch columns are not used
@@ -212,24 +238,22 @@ def _refresh_ui(recreate_params: bool):
                        borders_outerV=True,
                        borders_outerH=True):
 
-            dpg.add_table_column(label="Num", width=30)
-            dpg.add_table_column(label="Desc", width=150)
-            dpg.add_table_column(label="Files", width=250)
+            dpg.add_table_column(label="Num", width=36)
+            dpg.add_table_column(label="Desc", width=180)
+            dpg.add_table_column(label="Files", width=300)
 
             for t in sorted(CAMTools, key=lambda x: int(x.tnum) if x is not None else 0):
                 tnum = t.get_tool_num()
                 tdesc = t.get_desc()
-                tfiles = ""
                 with dpg.table_row():
-                    dpg.add_text(str(tnum))
-                    dpg.add_text(tdesc, wrap=150)
+                    _add_selectable_text(str(tnum))
+                    _add_selectable_text(tdesc, width=180, multiline=True, height=72)
                     with dpg.group():
                         for f in t.get_files():
                             if _is_file_enabled(f):
-                                #print("got one!"+f.name)
-                                dpg.add_text(f.name, color=enabled_tool_color)
+                                _add_selectable_text(f.name, color=enabled_tool_color)
                             else:
-                                dpg.add_text(f.name)
+                                _add_selectable_text(f.name)
 
 
 
@@ -244,8 +268,8 @@ def _refresh_ui(recreate_params: bool):
                        borders_outerH=True):
 
             dpg.add_table_column(label="File Name")
-            dpg.add_table_column(label="Tool")
-            dpg.add_table_column(label="Step")
+            dpg.add_table_column(label="Tool", width_fixed=True, init_width_or_weight=60)
+            dpg.add_table_column(label="Step", width_fixed=True, init_width_or_weight=54)
             dpg.add_table_column(label="Rule Match")
 
 
@@ -279,15 +303,13 @@ def _refresh_ui(recreate_params: bool):
                 with dpg.table_row():
                     if unmatched:
                         _add_unmatched_name_text(f.name, diff_spans)
+                        _add_selectable_text(tnum, color=unmatched_color)
+                        _add_selectable_text(step, color=unmatched_color)
                     else:
-                        dpg.add_text(f.name, color=txt_color)
-                    if unmatched:
-                        dpg.add_text(tnum, color=unmatched_color)
-                        dpg.add_text(step, color=unmatched_color)
-                    else:
-                        dpg.add_text(tnum)
-                        dpg.add_text(step)
-                    dpg.add_text(rule_match)
+                        _add_selectable_text(f.name, color=txt_color)
+                        _add_selectable_text(tnum)
+                        _add_selectable_text(step)
+                    _add_selectable_text(rule_match)
                     #print("RM: "+f.name+" "+rule_match+"<====>"+f.get_matching_search_string())
 
 
@@ -1134,37 +1156,37 @@ def set_cfg(path):
     _refresh_ui(True)
 
 
-with dpg.window(label="CAM Combiner", width=2500, height=1250):
+with dpg.window(label="CAM Combiner", width=2280, height=1200):
     with dpg.group(horizontal=True):
         with dpg.group(horizontal=False):
             with dpg.group(horizontal=True):
                 dpg.add_text("Base Directory:")
-                dpg.add_input_text(tag="base_val", readonly=True, width=500)
+                dpg.add_input_text(tag="base_val", readonly=True, width=600)
                 dpg.add_button(label="Choose Base", callback=lambda: dpg.show_item("base_dialog"))
 
             with dpg.group(horizontal=True):
                 dpg.add_text("Config File:")
-                dpg.add_input_text(tag="cfg_val", readonly=True, width=500)
+                dpg.add_input_text(tag="cfg_val", readonly=True, width=600)
                 dpg.add_button(label="Choose Config", callback=lambda: dpg.show_item("cfg_dialog"))
 
             with dpg.group(horizontal=True):
                 dpg.add_text("Shared GCode Dir:")
-                dpg.add_input_text(tag="shared_val", readonly=True, width=500)
+                dpg.add_input_text(tag="shared_val", readonly=True, width=600)
                 dpg.add_button(label="Choose Shared Dir", callback=lambda: dpg.show_item("shared_dialog"))
 
             with dpg.group(horizontal=True):
                 dpg.add_text("Output Director:")
-                dpg.add_input_text(tag="out_val", readonly=True, width=500)
+                dpg.add_input_text(tag="out_val", readonly=True, width=600)
                 dpg.add_button(label="Choose Output Dir", callback=lambda: dpg.show_item("out_dialog"))
 
             with dpg.group(horizontal=True):
                 dpg.add_text("Json Name:  ")
-                dpg.add_input_text(tag="json_name_val", default_value="", width=300,
+                dpg.add_input_text(tag="json_name_val", default_value="", width=360,
                                    callback=_on_json_name_change)
 
             with dpg.group(horizontal=True):
                 dpg.add_text("Sessions:   ")
-                dpg.add_combo(tag="session_combo", items=[], width=350)
+                dpg.add_combo(tag="session_combo", items=[], width=420)
                 dpg.add_button(label="Load", callback=_load_selected_session)
                 dpg.add_button(label="Save", callback=_save_current_session_manual)
 
@@ -1175,46 +1197,50 @@ with dpg.window(label="CAM Combiner", width=2500, height=1250):
 
     dpg.add_separator()
 
-    with dpg.group(horizontal=True, height=700):
-        with dpg.child_window(width=350, border=True):
+    with dpg.group(horizontal=True, height=516):
+        with dpg.child_window(width=192, border=True):
             dpg.add_text("Features", color=feature_based_color)
             dpg.add_group(tag="features_box")  # populated dynamically
 
-        with dpg.child_window(width=350, border=True):
+        with dpg.child_window(width=282, border=True):
             dpg.add_text("Parameters", color=param_based_color)
             dpg.add_group(tag="Parameters")  # populated dynamically
 
-        with dpg.group(horizontal=False, width=350):
-            dpg.add_group(tag="model_params", width=350, height=325)  # populated dynamically
-            dpg.add_group(tag="Options", width=350, height=325)  # populated dynamically
+        with dpg.child_window(width=282, border=True):
+            dpg.add_group(tag="model_params")  # populated dynamically
+            dpg.add_separator()
+            dpg.add_group(tag="Options")  # populated dynamically
 
-        with dpg.child_window(width=1000, border=True):
+        with dpg.child_window(width=1020, border=True):
             dpg.add_group(tag="files")  # populated dynamically
 
-        with dpg.child_window(width=500, border=True):
+        with dpg.child_window(width=402, border=True):
             dpg.add_group(tag="tools")  # populated dynamically
 
     dpg.add_separator()
-    with dpg.child_window(tag="Outputs_window", border=True, height=225, width=2450):
+    with dpg.child_window(tag="Outputs_window", border=True, height=320, width=2220):
         with dpg.table(tag="Outputs_table", header_row=True,
                        borders_innerH=True, borders_innerV=True, borders_outerV=True, borders_outerH=True):
-            dpg.add_table_column(label="Step", width_fixed=True, init_width_or_weight=45)
-            dpg.add_table_column(label="Out Name", width_fixed=True, init_width_or_weight=270)
+            dpg.add_table_column(label="Step", width_fixed=True, init_width_or_weight=54)
+            dpg.add_table_column(label="Out Name", width_fixed=True, init_width_or_weight=324)
             dpg.add_table_column(label="CAM Files Included", width_stretch=True)
     dpg.add_separator()
-    with dpg.child_window(tag="Log_window", border=True, height=100, width=2450, horizontal_scrollbar=True):
-        dpg.add_input_text(tag="Log", multiline=True, width=2400)
+    with dpg.child_window(tag="Log_window", border=True, height=-1, width=2220, horizontal_scrollbar=True):
+        dpg.add_input_text(tag="Log", multiline=True, width=2160, height=-1)
 
-with dpg.file_dialog(directory_selector=True, show=False, callback=choose_base, tag="base_dialog", width=1000, height=500):
+with dpg.file_dialog(directory_selector=True, show=False, callback=choose_base, tag="base_dialog", width=1200, height=600,
+                     default_path=r"G:\Shared drives\AlloyProjectFiles\Customer CAD files\Alloy-Standard-Builds-CAM"):
     dpg.add_file_extension(".*")
 
-with dpg.file_dialog(directory_selector=False, show=False, callback=choose_cfg, tag="cfg_dialog", width=1000, height=500):
+with dpg.file_dialog(directory_selector=False, show=False, callback=choose_cfg, tag="cfg_dialog", width=1200, height=600):
     dpg.add_file_extension(".*")
 
-with dpg.file_dialog(directory_selector=True, show=False, callback=choose_shared, tag="shared_dialog", width=1000, height=500):
+with dpg.file_dialog(directory_selector=True, show=False, callback=choose_shared, tag="shared_dialog", width=1200, height=600,
+                     default_path=r"G:\Shared drives\AlloyProjectFiles\Customer CAD files\Alloy-Standard-Builds-CAM"):
     dpg.add_file_extension(".*")
 
-with dpg.file_dialog(directory_selector=True, show=False, callback=choose_out, tag="out_dialog", width=1000, height=500):
+with dpg.file_dialog(directory_selector=True, show=False, callback=choose_out, tag="out_dialog", width=1200, height=600,
+                     default_path=r"G:\Shared drives\AlloyProjectFiles\Customer CAD files\Alloy-Standard-Builds-CAM"):
     dpg.add_file_extension(".*")
 
 dpg.setup_dearpygui()

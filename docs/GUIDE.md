@@ -58,6 +58,8 @@ Entry points:
 python cam_combiner_gui.py
 ```
 
+![CAM Combiner main window, with a fixture config loaded, Parameters/Features/Files/Tools panels populated, and the Outputs table showing the current plan](images/gui-overview.png)
+
 1. **Choose Base** — pick a `*-in` directory. This:
    - Auto-loads `fixture_config.txt` from that folder (if present).
    - Auto-fills the Output directory by swapping the `-in` suffix for `-out`
@@ -67,14 +69,22 @@ python cam_combiner_gui.py
      checkbox per subfolder-derived feature.
 2. **Choose Output Dir** — override the auto-filled output directory if needed.
    Also updates the "Json Name" field to the output folder's own name.
+
+   ![Toolbar: Base Directory, Config File, Shared GCode Dir, Output Director, Json Name, and Sessions rows](images/toolbar.png)
+
 3. Adjust **Parameters** (dropdowns/checkboxes, right panel) and **Features**
    (checkboxes, left panel) as needed. Each change automatically re-runs the
    plan and refreshes the **Outputs** table at the bottom, showing which
    source files will land in which combined output, per step.
+
+   ![Outputs table: Step, Out Name, and the CAM files included in each combined output](images/outputs-table.png)
+
 4. **Unit 1 Only** / **Zip Subdirs** — sit in the same row. "Unit 1 Only"
    limits generation to unit 1 regardless of `MAXUNITS`. "Zip Subdirs", if
    checked, replaces each per-unit/`1toN` output folder with a `<name>.zip`
    in its place (see [§9](#9-output-directory-layout-what-generate-output-produces)).
+
+   ![Parameters panel: Lefty, "unit_1_only" + Zip Subdirs (checked) in one row, then the config's dropdown parameters](images/parameters-panel.png)
 5. **Generate Output** — writes the combined output files, per-unit
    subfolders, `summary.txt`, and `tools.txt` to the output directory, and
    saves a session JSON (see [§8](#8-sessions)). The button disables itself
@@ -88,11 +98,24 @@ python cam_combiner_gui.py
 The **Files** panel (center) lists every scanned `.nc` file with its tool
 number, step, and which base-selection pattern (if any) matched it — useful
 for diagnosing why a file was or wasn't picked up. A root file with no
-match is shaded gray, with the point where its name first diverges from the
-closest candidate pattern highlighted in orange. The
-**Tools** panel (right) lists every tool number/description pair found
+match is shaded gray, with the token(s) that diverge from the closest
+candidate pattern highlighted in orange — each diverging `<...>` token gets
+its own highlight, so `01-standard-...-bt2-00.nc` (only `PinType` off) shows
+just `standard` highlighted, while `01-standard-...-bt1-00.nc` (`PinType`
+*and* `BlankThickness` off) shows both `standard` and `bt1`:
+
+![Files panel close-up: matched rows in red with a Rule Match pattern, unmatched rows shaded gray with only the diverging token(s) highlighted in orange](images/files-panel-rulematch.png)
+
+The **Tools** panel (right) lists every tool number/description pair found
 across all files, highlighting ones that are part of the current plan, and
 flagging tool-number conflicts (same number, different description).
+
+Text in "Model And Fixture Parameters," "Chosen Parameters," and the Files
+and Tools panels is selectable/copyable (click-drag then Ctrl+C), unlike
+plain DearPyGui text. The one exception is an unmatched file name with a
+highlighted diverging token (above) — that highlight requires multiple
+colors in one cell, which isn't selectable; everything else in that row
+still is.
 
 ---
 
@@ -600,15 +623,15 @@ it's automatically picked up by `conftest.py` — no test code changes needed.
 **A file I expected isn't in the plan.**
 Check the Files panel's "Rule Match" column (GUI) for that file — an empty
 value means no base pattern matched it and it's not part of any enabled
-feature. The row is shaded gray, and the file name is split at the point
-where it first diverges (case-insensitive) from whichever in-play base
-pattern got the closest, with that diverging tail highlighted in orange —
-point of divergence is not necessarily the actual typo, just the first
-character position two candidate strings disagree on. Common causes: the
-pattern's parameter values don't literally match the file name text (§6.2 —
-`values` must include any fixed prefix like `nw`), the entry's `condition`
-is false for the current parameters, or the file is a `-lefty`/`-righty`
-file filtered out by the current `Lefty` setting (§7.6).
+feature (§3, screenshot). The row is shaded gray, and only the `-`-separated
+token(s) that differ from whichever in-play base pattern is the closest
+match (fewest differing tokens) are highlighted in orange — not necessarily
+the actual typo, just wherever that candidate's tokens disagree with the
+file's. Common causes: the pattern's parameter values don't literally match
+the file name text (§6.2 — `values` must include any fixed prefix like
+`nw`), the entry's `condition` is false for the current parameters, or the
+file is a `-lefty`/`-righty` file filtered out by the current `Lefty`
+setting (§7.6).
 
 **Two files claim the same tool number with different descriptions.**
 Check `tools.txt` in the output directory after a run — the `Tools` panel
@@ -619,6 +642,8 @@ generation; verify manually that this is expected before running the job.
 in the log.**
 No file (exact or wildcard) matched that pattern for the current parameter
 values. The run continues — this is a warning, not an abort.
+
+![Log window showing "[warn] required base patterns missing: ..." followed by the planner's per-file output-selection dump](images/log-window-warning.png)
 
 **"Unit 1 Only" doesn't seem to change `1to2/`, `1to3/`, ... folders.**
 Those folders are only created for `unitnum in range(2, units_to_produce+1)`
