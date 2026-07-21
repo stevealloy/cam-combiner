@@ -93,6 +93,38 @@ class TestPlanSelection:
         _, by_step = plan(cfg, params, [f], "", [], [])
         assert f in by_step.get("01", [])
 
+    def test_exact_and_wildcard_files_both_selected(self):
+        # A file matching the literal parameter value and a separate file matching
+        # the wildcard placeholder both exist. Wildcards are treated as base files,
+        # so both should be selected rather than the exact match suppressing the
+        # wildcard file.
+        exact = _file("01-backprep-s21-ftPT30-01.nc")
+        wild = _file("01-backprep-AnyScale-ftPT30-01.nc")
+        cfg = _cfg("01-out.nc", base_entries=[
+            {"name": "01-backprep-<Scale>-ftPT30", "required": "True", "condition": "None"}
+        ])
+        params = {"Scale": "s21"}
+        cfg["parameters"] = [{"name": "Scale", "wildcard": "AnyScale", "values": ["s21"], "default": "s21"}]
+        _, by_step = plan(cfg, params, [exact, wild], "", [], [])
+        assert exact in by_step.get("01", [])
+        assert wild in by_step.get("01", [])
+
+    def test_wildcard_files_ordered_as_if_resolved(self):
+        # The wildcard file's un-templated suffix ("AaronV") sorts alphabetically
+        # before the exact file's suffix ("Gibson") once the wildcard token is
+        # resolved to its real value. Output order should follow that resolved
+        # sequence rather than grouping the exact match first just because it
+        # was found on an earlier attempt level.
+        exact = _file("05-profile-s25PT5-nw43-Gibson-NFrets22-01.nc")
+        wild = _file("05-profile-AnyScale-nw43-AaronV-NFrets24-01.nc")
+        cfg = _cfg("05-out.nc", base_entries=[
+            {"name": "05-profile-<Scale>", "required": "True", "condition": "None"}
+        ])
+        params = {"Scale": "s25PT5"}
+        cfg["parameters"] = [{"name": "Scale", "wildcard": "AnyScale", "values": ["s25PT5"], "default": "s25PT5"}]
+        _, by_step = plan(cfg, params, [exact, wild], "", [], [])
+        assert by_step.get("05", []) == [wild, exact]
+
     def test_unmatched_file_not_selected(self):
         f = _file("01-something-else-01.nc")
         cfg = _cfg("01-out.nc", base_entries=[

@@ -12,7 +12,11 @@
       "Bash(Select-Object Name)",
       "PowerShell(Get-Process *)",
       "Bash(git commit *)",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "Bash(python -m py_compile \"cam_combiner_gui.py\")",
+      "Bash(python -m pytest tests/test_planner.py -q)",
+      "Bash(python -m pytest tests/test_integration.py -q)",
+      "Bash(python -m pytest tests/ -q -k \"not fail\")"
     ]
   }
 }

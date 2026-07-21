@@ -33,8 +33,6 @@ state = {
     "json_name": "",            # stem of the session JSON file (no extension)
 }
 
-_pending_save_name: list = [None]  # mutable cell for overwrite-confirm dialog
-
 param_based_color = (255, 0, 0, 255)  # red
 feature_based_color = (0, 255, 0, 255)  # green
 enabled_feature_color = (25, 255, 0, 255)  # green
@@ -913,30 +911,15 @@ def _write_session_file(name: str):
     debug_print(f"[info] Session saved as {filename}")
 
 
-def _do_overwrite_save(sender=None, app_data=None):
-    dpg.configure_item("overwrite_modal", show=False)
-    if _pending_save_name[0]:
-        _write_session_file(_pending_save_name[0])
-        _pending_save_name[0] = None
-
-
 def _save_session_named(name: str):
-    """Save current state as <name>.json, asking confirmation on name conflict."""
+    """Save current state as <name>.json, always overwriting any existing file."""
     if not name:
         debug_print("[warn] Json Name is empty, skipping session save")
         return
     if not state.get("output_base"):
         debug_print("[error] No output directory set, cannot save session")
         return
-    model_name = str(state["cfg"].get("MODEL", "")) if state.get("cfg") else ""
-    path = os.path.join(state["output_base"], name + ".json")
-    if name != model_name and os.path.isfile(path):
-        _pending_save_name[0] = name
-        if dpg.does_item_exist("overwrite_modal_text"):
-            dpg.set_value("overwrite_modal_text", f'"{name}.json" already exists. Overwrite?')
-        dpg.configure_item("overwrite_modal", show=True)
-    else:
-        _write_session_file(name)
+    _write_session_file(name)
 
 
 def _load_selected_session(sender=None, app_data=None):
@@ -1147,16 +1130,6 @@ with dpg.file_dialog(directory_selector=True, show=False, callback=choose_shared
 
 with dpg.file_dialog(directory_selector=True, show=False, callback=choose_out, tag="out_dialog", width=1000, height=500):
     dpg.add_file_extension(".*")
-
-with dpg.window(label="Confirm Overwrite", modal=True, show=False, tag="overwrite_modal",
-                no_resize=True, width=420, height=110, pos=[550, 420]):
-    dpg.add_text("", tag="overwrite_modal_text")
-    dpg.add_spacer(height=8)
-    with dpg.group(horizontal=True):
-        dpg.add_button(label="Overwrite", width=110, callback=_do_overwrite_save)
-        dpg.add_spacer(width=12)
-        dpg.add_button(label="Cancel", width=110,
-                       callback=lambda: dpg.configure_item("overwrite_modal", show=False))
 
 dpg.setup_dearpygui()
 dpg.show_viewport()

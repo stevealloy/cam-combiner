@@ -19,7 +19,7 @@ def _param_lookup(parameters: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]
     return out
 
 
-def _render_pattern(name: str, params: Dict[str, Any], pmap: Dict[str, Dict[str, Any]]) -> List[Tuple[str, str]]:
+def _render_pattern(name: str, params: Dict[str, Any], pmap: Dict[str, Dict[str, Any]]) -> Tuple[List[Tuple[str, str]], Dict[str, str]]:
     tokens = re.findall(r"<([A-Za-z_]\w*)(?::(lower|upper))?>", name)
 
     token_values = {}
@@ -57,13 +57,24 @@ def _render_pattern(name: str, params: Dict[str, Any], pmap: Dict[str, Dict[str,
             if labels:
                 attempts.append((_render(set(combo)), f"wildcard({','.join(labels)})"))
 
-    return attempts
+    wc_to_value = {wc: token_values[t] for t, wc in token_wildcards.items() if wc}
+    return attempts, wc_to_value
 
 
 def _match_files(files: List[CAMFile], attempt: str) -> List[CAMFile]:
     esc = re.escape(attempt)
     rx = re.compile(rf"^{esc}(?:[-.].*)?$", re.IGNORECASE)
     return [f for f in files if rx.match(f.name)]
+
+
+def _resolved_sort_key(fname: str, wc_to_value: Dict[str, str]) -> str:
+    """Substitute wildcard placeholder text in fname with its resolved value,
+    so a wildcard-matched file sorts into the same position it would occupy
+    if the wildcard were fully resolved, alongside non-wildcard matches."""
+    resolved = fname
+    for wc, val in wc_to_value.items():
+        resolved = resolved.replace(wc, val)
+    return resolved
 
 
 def _scan_features():
@@ -245,18 +256,25 @@ def plan(cfg: Dict[str, Any],
             debug_print(f"[cond] {patt}: {cond or 'None'} => {ok}")
         if not ok:
             continue
-        attempts = _render_pattern(patt, params, pmap)
+        # Wildcard substitutions are treated as base files: every attempt level
+        # (exact and each wildcard combination) is searched and matches are
+        # unioned, rather than stopping once the exact match is found. Matches
+        # are then ordered as if every wildcard had been resolved to its real
+        # value, so wildcard files fall in sequence with non-wildcard files
+        # instead of being grouped by which attempt level found them.
+        attempts, wc_to_value = _render_pattern(patt, params, pmap)
         matches = []
-        level = "none"
+        seen = set()
         for concrete, lvl in attempts:
             if verbose:
                 debug_print(f"[debug] pattern concrete='{concrete}'")
-            matches = _match_files(files, concrete)
-            if matches:
-                level = lvl
-                break
+            for m in _match_files(files, concrete):
+                if id(m) not in seen:
+                    seen.add(id(m))
+                    matches.append(m)
+        matches.sort(key=lambda m: _resolved_sort_key(m.name, wc_to_value))
         if verbose:
-            debug_print(f"[base] {patt}: matches={len(matches)} level={level}")
+            debug_print(f"[base] {patt}: matches={len(matches)}")
         if required and not matches:
             req_missing.append(patt)
         for m in matches:
