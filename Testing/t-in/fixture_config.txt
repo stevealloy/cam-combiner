@@ -7,7 +7,6 @@
     "MAXUNITS":3,
     "DIRECTION":"HORIZONTAL", // Dir of duplication: HORIZONTAL==x axis (bodies) or VERTICAL==y axis (fingerboards)
 
-    "HasStartAndEnd":"True", // for stages 7 and 9, this determines if the -start and -end are used to distinguish CAM that goes before Features from CAM taht goes after Features are inserted
     "NUM-STEPS":12,
     "FRONT-STEP":"10",
     "BACK-STEP":"08",
@@ -26,10 +25,6 @@
             "10-front.nc",
             "11-final-profiles-front-up.nc"
     ],
-
-    // Defaults
-    "LEFTY":"False",
-    "NUMUNITS":3,
 
     "unused":"foobar" // all prior lines need trailing comman
 

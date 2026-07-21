@@ -7,10 +7,6 @@
     "MAXUNITS":5,
     "DIRECTION":"VERTICAL", // Dir of duplication: HORIZONTAL==x axis (bodies) or VERTICAL==y axis (fingerboards)
 
-    // Defaults
-    "LEFTY":"False",
-    "NUMUNITS":2,
-
     "PARAMETERS": [
         {
             "name":"Scale",
@@ -170,7 +166,6 @@
             { "name":"06-side-dots-<SideDotDesign>-<SideDepth>-<Scale>-<Radius>",   "required":"False", "condition":"None" }
     ],
 
-    "HasStartAndEnd":"True", // for front and back steps, this determines if the -start and -end are used to distinguish CAM that goes before Features from CAM that goes after Features are inserted
     "FRONT-STEP":"02-",
     "BACK-STEP":"08-",
     "NUM-STEPS":10,

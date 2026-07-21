@@ -1073,19 +1073,7 @@ with dpg.window(label="CAM Combiner", width=2500, height=1250):
 
     dpg.add_separator()
     with dpg.group(horizontal=True, parent="Parameters"):
-        cid = dpg.add_checkbox(
-            label="Unit 1 Only",
-            tag="unit_1_only",
-            default_value=False,
-            callback = _on_param_change,
-            user_data = "unit_1_only"
-        )
-        state["params"]["unit_1_only"] = False
-        state["param_values"]["unit_1_only"] = ""
-
-        dpg.add_button(label="Plan Outputs", callback=run_plan)
-
-        dpg.add_button(label="Do It!", callback=generate_output)
+        dpg.add_button(label="Generate Output", callback=generate_output)
 
     dpg.add_separator()
 
