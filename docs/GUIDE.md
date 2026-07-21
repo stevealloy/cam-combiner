@@ -71,10 +71,14 @@ python cam_combiner_gui.py
    (checkboxes, left panel) as needed. Each change automatically re-runs the
    plan and refreshes the **Outputs** table at the bottom, showing which
    source files will land in which combined output, per step.
-4. **Generate Output** — writes the combined output files, per-unit
+4. **Unit 1 Only** / **Zip Subdirs** — sit in the same row. "Unit 1 Only"
+   limits generation to unit 1 regardless of `MAXUNITS`. "Zip Subdirs", if
+   checked, replaces each per-unit/`1toN` output folder with a `<name>.zip`
+   in its place (see [§9](#9-output-directory-layout-what-generate-output-produces)).
+5. **Generate Output** — writes the combined output files, per-unit
    subfolders, `summary.txt`, and `tools.txt` to the output directory, and
    saves a session JSON (see [§8](#8-sessions)).
-5. **Sessions** — save/load a named JSON snapshot of the current
+6. **Sessions** — save/load a named JSON snapshot of the current
    directories/parameters/features via the dropdown + Load/Save buttons.
 
 The **Files** panel (center) lists every scanned `.nc` file with its tool
@@ -406,6 +410,11 @@ all file blocks, reselecting the **first** tool used in that step.
 `-NODUP` files are written once (unit 1 only, unmirrored) and skipped
 entirely from `1toN` folders. `-NOMIRROR` files are duplicated per unit
 normally but never mirrored.
+
+If **Zip Subdirs** is checked, every `1/ .. N/` and `1to2/ .. 1toN/` folder
+is zipped to `<name>.zip` in `<output_dir>` and the folder itself is deleted
+— e.g. `1/` becomes `1.zip`, `1to2/` becomes `1to2.zip`. `summary.txt`,
+`tools.txt`, and the root combined output files are unaffected.
 
 ---
 

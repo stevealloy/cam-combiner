@@ -119,6 +119,8 @@ def _refresh_ui(recreate_params: bool):
     if recreate_params:
         with dpg.group(horizontal=False, parent="Parameters"):
             for p in state["params"]:
+                if p == "zip_subdirs":
+                    continue  # rendered alongside unit_1_only below
                 with dpg.group(horizontal=True, parent="Parameters"):
                      # Label + combo per parameter
                     if state["param_values"][p] == "":
@@ -136,6 +138,12 @@ def _refresh_ui(recreate_params: bool):
                             callback=_on_param_change,
                             user_data=p
                         )
+
+                    if p == "unit_1_only" and "zip_subdirs" in state["params"]:
+                        dpg.add_checkbox(label="Zip Subdirs",
+                                         default_value=bool(state["params"].get("zip_subdirs", False)),
+                                         callback=_on_param_change,
+                                         user_data="zip_subdirs")
 
         with dpg.group(parent="features_box"):
             for fb in FeatureBlocks:
@@ -347,6 +355,22 @@ def generate_output(sender=None, app_data=None, user_data=None):
     _save_session_named(json_name)
 
 
+
+
+def _zip_and_remove_unit_subdirs(base_output_dir, units_to_produce):
+    """Zip each per-unit/1toN output subdir into <name>.zip, then remove it."""
+    names = [str(u) for u in range(1, units_to_produce + 1)]
+    names += ["1to" + str(n) for n in range(2, units_to_produce + 1)]
+
+    for name in names:
+        subdir = os.path.join(base_output_dir, name)
+        if not os.path.isdir(subdir):
+            continue
+        zip_base = os.path.join(base_output_dir, name)
+        if os.path.exists(zip_base + ".zip"):
+            os.remove(zip_base + ".zip")
+        shutil.make_archive(zip_base, "zip", subdir)
+        shutil.rmtree(subdir)
 
 
 def write_output_files():
@@ -749,6 +773,9 @@ def write_output_files():
             with open(ofname, "w") as output_file:
                 write_output_file(cfile, fname, output_file, 1, i, lefty, -1, True, cline, cline_delta, direction)
 
+    if state["params"].get("zip_subdirs"):
+        _zip_and_remove_unit_subdirs(base_output_dir, units_to_produce)
+
     if 0:
         # create archive files (in, out)
         dtime: datetime = datetime.now()
@@ -1009,6 +1036,8 @@ def set_cfg(path):
     state["param_values"]["Lefty"] = ""
     state["params"]["unit_1_only"] = False
     state["param_values"]["unit_1_only"] = ""
+    state["params"]["zip_subdirs"] = False
+    state["param_values"]["zip_subdirs"] = ""
 
     params_list = cfg.get("parameters", [])
     if not isinstance(params_list, list):
@@ -1021,7 +1050,7 @@ def set_cfg(path):
         name = p.get("name")
         if not name:
             continue
-        if name in ("Lefty", "unit_1_only"):
+        if name in ("Lefty", "unit_1_only", "zip_subdirs"):
             continue
         items = p.get("values", [])
         # normalize: dearpygui expects strings
