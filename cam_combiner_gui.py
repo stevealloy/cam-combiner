@@ -41,6 +41,7 @@ feat_color = (255, 255, 255, 255) # white
 enabled_tool_color =  (255, 255, 0, 255) #
 unmatched_color = (120, 120, 120, 255)  # gray: shades out root files with no Rule Match
 mismatch_highlight_color = (255, 140, 0, 255)  # orange: the part of the name that diverged
+status_color = (255, 200, 0, 255)  # amber: "Generate Output" is currently running
 
 CAMFiles: list[CAMFile] = []           # CAMFile objects
 CAMFeatures: list[CAMFeature] = []      # CAMFeature objects
@@ -100,6 +101,11 @@ def _add_unmatched_name_text(name: str, spans):
             pos = end
         if pos < len(name):
             dpg.add_text(name[pos:], color=unmatched_color)
+
+
+def _set_status(stage: str):
+    # No forced render here: reentrant dpg.render_dearpygui_frame() calls crashed (0xC0000005) -- callers defer via dpg.set_frame_callback() instead.
+    dpg.set_value("status_text", f"Working: {stage}..." if stage else "")
 
 
 def _refresh_ui(recreate_params: bool):
@@ -344,42 +350,80 @@ def run_plan(sender=None, app_data=None, user_data=None):
     state["by_step"] = by_step
 
 
+def _generate_output_failed(exc: Exception):
+    debug_print(f"[error] Generate Output failed: {exc}")
+    _set_status("")
+    dpg.configure_item("generate_output_btn", enabled=True)
+
+
 def generate_output(sender=None, app_data=None, user_data=None):
+    # Kicks off a chain of stages deferred via dpg.set_frame_callback() so the status label paints between them.
+    debug_print("=================================================")
+    debug_print("=================================================")
+    debug_print("=================================================")
+
+    dpg.configure_item("generate_output_btn", enabled=False)
+    _set_status("Computing unit code")
+    dpg.set_frame_callback(dpg.get_frame_count() + 2, _generate_output_stage_unit_code)
+
+
+def _generate_output_stage_unit_code(sender=None, app_data=None, user_data=None):
     global CAMFiles, CAMFeatures, FeatureBlocks, CAMTools
+    try:
+        cline_delta = float(state["cfg"]["CLINE_DELTA"])
+        max_units = state["cfg"]["MAXUNITS"]
+        direction = state["cfg"]["DIRECTION"]
 
-    debug_print("=================================================")
-    debug_print("=================================================")
-    debug_print("=================================================")
-    outputs = state["resolved"]
-    by_step = state["by_step"]
-    cfg = state["cfg"]
+        # for each file, ask the CAMFile object to produce the code for all individual units.
+        for f in CAMFiles:
+            f.create_unit_code(max_units, cline_delta, direction)
 
-    #debug_print(outputs)
-    #debug_print(by_step)
+        _set_status("Writing output files")
+        dpg.set_frame_callback(dpg.get_frame_count() + 2, _generate_output_stage_write)
+    except Exception as e:
+        _generate_output_failed(e)
 
-    model = state["cfg"]["MODEL"]
-    cline = state["cfg"]["CLINE"]
-    cline_delta = float(state["cfg"]["CLINE_DELTA"])
-    max_units = state["cfg"]["MAXUNITS"]
-    direction = state["cfg"]["DIRECTION"]
-    lefty = state["params"]["Lefty"]
 
-    #debug_print(model+str(cline)+str(cline_delta)+str(max_units)+direction+str(lefty))
+def _generate_output_stage_write(sender=None, app_data=None, user_data=None):
+    try:
+        write_output_files()
 
-    # for each file, ask the CAMFile object to produce the code for all individual units.
-    for f in CAMFiles:
-        f.create_unit_code(max_units, cline_delta, direction)
+        if state["params"].get("zip_subdirs"):
+            _set_status("Zipping subdirectories")
+            dpg.set_frame_callback(dpg.get_frame_count() + 2, _generate_output_stage_zip)
+        else:
+            _generate_output_stage_finish()
+    except Exception as e:
+        _generate_output_failed(e)
 
-    write_output_files()
 
-    json_name = dpg.get_value("json_name_val").strip()
-    state["json_name"] = json_name
-    model_name = str(state["cfg"].get("MODEL", ""))
-    output_basename = os.path.basename(state.get("output_base", ""))
-    if json_name and json_name != model_name and state.get("output_base") and output_basename != json_name:
-        _copy_root_outputs_to_subdir(json_name)
+def _generate_output_stage_zip(sender=None, app_data=None, user_data=None):
+    try:
+        max_units = state["cfg"]["MAXUNITS"]
+        units_to_produce = 1 if state["params"]["unit_1_only"] else max_units
+        _zip_and_remove_unit_subdirs(state["output_base"], units_to_produce)
+        _generate_output_stage_finish()
+    except Exception as e:
+        _generate_output_failed(e)
 
-    _save_session_named(json_name)
+
+def _generate_output_stage_finish():
+    try:
+        json_name = dpg.get_value("json_name_val").strip()
+        state["json_name"] = json_name
+        model_name = str(state["cfg"].get("MODEL", ""))
+        output_basename = os.path.basename(state.get("output_base", ""))
+        if json_name and json_name != model_name and state.get("output_base") and output_basename != json_name:
+            _set_status("Copying archive files")
+            _copy_root_outputs_to_subdir(json_name)
+
+        _set_status("Saving session")
+        _save_session_named(json_name)
+
+        _set_status("")
+        dpg.configure_item("generate_output_btn", enabled=True)
+    except Exception as e:
+        _generate_output_failed(e)
 
 
 
@@ -800,9 +844,6 @@ def write_output_files():
             with open(ofname, "w") as output_file:
                 write_output_file(cfile, fname, output_file, 1, i, lefty, -1, True, cline, cline_delta, direction)
 
-    if state["params"].get("zip_subdirs"):
-        _zip_and_remove_unit_subdirs(base_output_dir, units_to_produce)
-
     if 0:
         # create archive files (in, out)
         dtime: datetime = datetime.now()
@@ -1129,7 +1170,8 @@ with dpg.window(label="CAM Combiner", width=2500, height=1250):
 
     dpg.add_separator()
     with dpg.group(horizontal=True, parent="Parameters"):
-        dpg.add_button(label="Generate Output", callback=generate_output)
+        dpg.add_button(label="Generate Output", tag="generate_output_btn", callback=generate_output)
+        dpg.add_text("", tag="status_text", color=status_color)
 
     dpg.add_separator()
 

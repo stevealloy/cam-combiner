@@ -77,7 +77,11 @@ python cam_combiner_gui.py
    in its place (see [§9](#9-output-directory-layout-what-generate-output-produces)).
 5. **Generate Output** — writes the combined output files, per-unit
    subfolders, `summary.txt`, and `tools.txt` to the output directory, and
-   saves a session JSON (see [§8](#8-sessions)).
+   saves a session JSON (see [§8](#8-sessions)). The button disables itself
+   and an amber "Working: \<stage\>..." indicator appears beside it while
+   this runs (stages: computing unit code, writing output files, zipping
+   subdirectories if enabled, copying archive files if the json name
+   differs, saving session), clearing once it's done.
 6. **Sessions** — save/load a named JSON snapshot of the current
    directories/parameters/features via the dropdown + Load/Save buttons.
 
