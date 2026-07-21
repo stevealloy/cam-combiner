@@ -39,6 +39,8 @@ enabled_feature_color = (25, 255, 0, 255)  # green
 root_non_param_color = (0, 0, 255, 255)  # blue
 feat_color = (255, 255, 255, 255) # white
 enabled_tool_color =  (255, 255, 0, 255) #
+unmatched_color = (120, 120, 120, 255)  # gray: shades out root files with no Rule Match
+mismatch_highlight_color = (255, 140, 0, 255)  # orange: the part of the name that diverged
 
 CAMFiles: list[CAMFile] = []           # CAMFile objects
 CAMFeatures: list[CAMFeature] = []      # CAMFeature objects
@@ -82,6 +84,22 @@ def _is_file_enabled(file_target: CAMFile)->bool:
                 return True
 
     return False
+
+
+def _add_unmatched_name_text(name: str, spans):
+    """Render name gray with only the given (start,end) char spans in orange."""
+    if not spans:
+        dpg.add_text(name, color=unmatched_color)
+        return
+    with dpg.group(horizontal=True, horizontal_spacing=0):
+        pos = 0
+        for start, end in sorted(spans):
+            if start > pos:
+                dpg.add_text(name[pos:start], color=unmatched_color)
+            dpg.add_text(name[start:end], color=mismatch_highlight_color)
+            pos = end
+        if pos < len(name):
+            dpg.add_text(name[pos:], color=unmatched_color)
 
 
 def _refresh_ui(recreate_params: bool):
@@ -222,7 +240,6 @@ def _refresh_ui(recreate_params: bool):
             dpg.add_table_column(label="File Name")
             dpg.add_table_column(label="Tool")
             dpg.add_table_column(label="Step")
-            dpg.add_table_column(label="Feature")
             dpg.add_table_column(label="Rule Match")
 
 
@@ -230,30 +247,40 @@ def _refresh_ui(recreate_params: bool):
             for f in CAMFiles:
                 tnum = str(f.get_toolnum())
                 step = str(f.get_step())
-                feat_name = ""
                 rule_match = ""
+                unmatched = False
+                diff_spans = []
                 if f.is_root():
                     # Root directory files (project root or shared root). if params are active: param color else root color
                     if "INPUT-FILE-NAME-BASES" in state["cfg"]:
                         # param based
-                        txt_color = param_based_color
                         rule_match = f.get_matching_search_string()
+                        if rule_match:
+                            txt_color = param_based_color
+                        else:
+                            # No base pattern matched this file: shade it out and
+                            # highlight only the token(s) that diverge from the
+                            # closest candidate pattern, so it's easy to spot why.
+                            unmatched = True
+                            txt_color = unmatched_color
+                            diff_spans = f.get_match_diff_spans()
                     else:
                         txt_color = root_non_param_color
 
                 else:
                     txt_color = feature_based_color
-                    feat_name = f.get_feature_name()
-                    for ft in CAMFeatures:
-                        if ft.name == feat_name:
-                            feat_color = enabled_feature_color if ft.get_enabled() else (255, 255, 255, 255)
-                            break
 
                 with dpg.table_row():
-                    dpg.add_text(f.name, color=txt_color)
-                    dpg.add_text(tnum)
-                    dpg.add_text(step)
-                    dpg.add_text(feat_name, color=feat_color)
+                    if unmatched:
+                        _add_unmatched_name_text(f.name, diff_spans)
+                    else:
+                        dpg.add_text(f.name, color=txt_color)
+                    if unmatched:
+                        dpg.add_text(tnum, color=unmatched_color)
+                        dpg.add_text(step, color=unmatched_color)
+                    else:
+                        dpg.add_text(tnum)
+                        dpg.add_text(step)
                     dpg.add_text(rule_match)
                     #print("RM: "+f.name+" "+rule_match+"<====>"+f.get_matching_search_string())
 

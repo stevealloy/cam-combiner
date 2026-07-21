@@ -67,6 +67,29 @@ def _match_files(files: List[CAMFile], attempt: str) -> List[CAMFile]:
     return [f for f in files if rx.match(f.name)]
 
 
+def _token_diff(file_name: str, candidate: str) -> Tuple[int, List[Tuple[int, int]]]:
+    """Compare candidate's '-'-separated tokens against file_name's leading
+    tokens (case-insensitive). Returns (differing_token_count, char_spans)
+    where char_spans locates each differing/missing token within file_name,
+    so a divergence in one token doesn't drag in an otherwise-matching tail."""
+    cand_tokens = candidate.split("-")
+    file_tokens = file_name.split("-")
+
+    diff_count = 0
+    spans = []
+    pos = 0
+    for i, ctok in enumerate(cand_tokens):
+        if i >= len(file_tokens):
+            diff_count += 1
+            continue
+        ftok = file_tokens[i]
+        if ftok.lower() != ctok.lower():
+            diff_count += 1
+            spans.append((pos, pos + len(ftok)))
+        pos += len(ftok) + 1  # +1 for the '-' separator
+    return diff_count, spans
+
+
 def _resolved_sort_key(fname: str, wc_to_value: Dict[str, str]) -> str:
     """Substitute wildcard placeholder text in fname with its resolved value,
     so a wildcard-matched file sorts into the same position it would occupy
@@ -231,6 +254,10 @@ def plan(cfg: Dict[str, Any],
     # clear the search string matches in all files
     for m in files:
         m.set_matching_search_string("")
+        m.set_match_diff_spans([])
+
+    # id(file) -> (fewest differing tokens seen so far, char spans of those tokens)
+    best_diff: Dict[int, Tuple[int, List[Tuple[int, int]]]] = {}
 
     selected_by_step: Dict[str, List[CAMFile]] = {}
     sorted_selected_by_step: Dict[str, List[CAMFile]] = {}
@@ -272,6 +299,11 @@ def plan(cfg: Dict[str, Any],
                 if id(m) not in seen:
                     seen.add(id(m))
                     matches.append(m)
+            for m in files:
+                diff_count, spans = _token_diff(m.name, concrete)
+                prev = best_diff.get(id(m))
+                if prev is None or diff_count < prev[0]:
+                    best_diff[id(m)] = (diff_count, spans)
         matches.sort(key=lambda m: _resolved_sort_key(m.name, wc_to_value))
         if verbose:
             debug_print(f"[base] {patt}: matches={len(matches)}")
@@ -284,6 +316,14 @@ def plan(cfg: Dict[str, Any],
             selected_by_step.setdefault(step, []).append(m)
             m.set_matching_search_string(patt)
             #print("match: " + patt + str(m.name))
+
+    # For files that never got a full match against any in-play base pattern,
+    # record which token(s) diverge from the closest attempt (fewest differing
+    # tokens wins), so the GUI can highlight just those (Files panel "Rule
+    # Match" column) instead of the whole tail past the first difference.
+    for m in files:
+        if not m.get_matching_search_string() and id(m) in best_diff:
+            m.set_match_diff_spans(best_diff[id(m)][1])
 
     if not base_entries:
         if verbose:

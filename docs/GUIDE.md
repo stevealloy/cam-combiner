@@ -82,8 +82,10 @@ python cam_combiner_gui.py
    directories/parameters/features via the dropdown + Load/Save buttons.
 
 The **Files** panel (center) lists every scanned `.nc` file with its tool
-number, step, feature name, and which base-selection pattern (if any)
-matched it — useful for diagnosing why a file was or wasn't picked up. The
+number, step, and which base-selection pattern (if any) matched it — useful
+for diagnosing why a file was or wasn't picked up. A root file with no
+match is shaded gray, with the point where its name first diverges from the
+closest candidate pattern highlighted in orange. The
 **Tools** panel (right) lists every tool number/description pair found
 across all files, highlighting ones that are part of the current plan, and
 flagging tool-number conflicts (same number, different description).
@@ -594,11 +596,15 @@ it's automatically picked up by `conftest.py` — no test code changes needed.
 **A file I expected isn't in the plan.**
 Check the Files panel's "Rule Match" column (GUI) for that file — an empty
 value means no base pattern matched it and it's not part of any enabled
-feature. Common causes: the pattern's parameter values don't literally
-match the file name text (§6.2 — `values` must include any fixed prefix
-like `nw`), the entry's `condition` is false for the current parameters, or
-the file is a `-lefty`/`-righty` file filtered out by the current `Lefty`
-setting (§7.6).
+feature. The row is shaded gray, and the file name is split at the point
+where it first diverges (case-insensitive) from whichever in-play base
+pattern got the closest, with that diverging tail highlighted in orange —
+point of divergence is not necessarily the actual typo, just the first
+character position two candidate strings disagree on. Common causes: the
+pattern's parameter values don't literally match the file name text (§6.2 —
+`values` must include any fixed prefix like `nw`), the entry's `condition`
+is false for the current parameters, or the file is a `-lefty`/`-righty`
+file filtered out by the current `Lefty` setting (§7.6).
 
 **Two files claim the same tool number with different descriptions.**
 Check `tools.txt` in the output directory after a run — the `Tools` panel

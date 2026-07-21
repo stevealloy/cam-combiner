@@ -57,6 +57,7 @@ class CAMFile:
         self._output = []  # dynamic 2 dim array [unit_num][lines]
 
         self._matching_search_string = ""
+        self._match_diff_spans = []  # [(start,end), ...] char ranges in self.name that diverge from the closest base pattern, if unmatched
 
         if self._debug:
             debug_print("New CAMFile: n:" + self.name + "D:" + directory + "====" + self._dir + " is base?")
@@ -128,6 +129,12 @@ class CAMFile:
 
     def get_matching_search_string(self) -> str:
         return self._matching_search_string
+
+    def set_match_diff_spans(self, spans):
+        self._match_diff_spans = spans
+
+    def get_match_diff_spans(self):
+        return self._match_diff_spans
 
     def get_tool(self):
         return self._tool
