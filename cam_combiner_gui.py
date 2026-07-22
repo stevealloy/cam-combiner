@@ -12,7 +12,7 @@ from cam_core.Tool import Tool
 from cam_core.FeatureBlock import FeatureBlock
 
 import dearpygui.dearpygui as dpg  # type: ignore
-import os, re, shutil, tempfile
+import os, re, shutil, tempfile, textwrap
 
 print(GUI_BANNER)
 print("="*40)
@@ -116,6 +116,16 @@ def _text_theme(color):
                 dpg.add_theme_color(dpg.mvThemeCol_TextDisabled, color)
         _text_themes[color] = theme
     return _text_themes[color]
+
+
+def _wrap_for_width(text: str, pixel_width: int) -> str:
+    # input_text (unlike add_text) has no built-in word-wrap, so pre-break it into real newlines sized to the actual font.
+    if not text:
+        return text
+    size = dpg.get_text_size("M")
+    char_w = (size[0] if size else 0) or 7
+    max_chars = max(1, int(pixel_width // char_w))
+    return "\n".join(textwrap.wrap(text, width=max_chars)) or text
 
 
 def _add_selectable_text(text: str, color=None, width=-1, multiline=False, height=0):
@@ -239,16 +249,17 @@ def _refresh_ui(recreate_params: bool):
                        borders_outerV=True,
                        borders_outerH=True):
 
-            dpg.add_table_column(label="Num", width=36)
-            dpg.add_table_column(label="Desc", width=180)
-            dpg.add_table_column(label="Files", width=300)
+            # width= alone isn't honored as a literal pixel width under SizingStretchProp -- width_fixed makes it one, matching the Files-panel Tool/Step columns.
+            dpg.add_table_column(label="Num", width_fixed=True, init_width_or_weight=15)
+            dpg.add_table_column(label="Desc", width_fixed=True, init_width_or_weight=63)
+            dpg.add_table_column(label="Files", width_fixed=True, init_width_or_weight=527)
 
             for t in sorted(CAMTools, key=lambda x: int(x.tnum) if x is not None else 0):
                 tnum = t.get_tool_num()
                 tdesc = t.get_desc()
                 with dpg.table_row():
                     _add_selectable_text(str(tnum))
-                    _add_selectable_text(tdesc, width=180, multiline=True, height=72)
+                    _add_selectable_text(_wrap_for_width(tdesc, 63), width=63, multiline=True, height=100)
                     with dpg.group():
                         for f in t.get_files():
                             if _is_file_enabled(f):
@@ -268,10 +279,10 @@ def _refresh_ui(recreate_params: bool):
                        borders_outerV=True,
                        borders_outerH=True):
 
-            dpg.add_table_column(label="File Name")
-            dpg.add_table_column(label="Tool", width_fixed=True, init_width_or_weight=60)
-            dpg.add_table_column(label="Step", width_fixed=True, init_width_or_weight=54)
-            dpg.add_table_column(label="Rule Match")
+            dpg.add_table_column(label="File Name", width_stretch=True, init_width_or_weight=0.6)
+            dpg.add_table_column(label="Tool", width_fixed=True, init_width_or_weight=36)
+            dpg.add_table_column(label="Step", width_fixed=True, init_width_or_weight=32)
+            dpg.add_table_column(label="Rule Match", width_stretch=True, init_width_or_weight=0.25)
 
 
             txt_color = param_based_color
@@ -1246,10 +1257,10 @@ with dpg.window(label="CAM Combiner", width=2280, height=1200):
             dpg.add_separator()
             dpg.add_group(tag="Options")  # populated dynamically
 
-        with dpg.child_window(width=1020, border=True):
+        with dpg.child_window(width=800, border=True):
             dpg.add_group(tag="files")  # populated dynamically
 
-        with dpg.child_window(width=402, border=True):
+        with dpg.child_window(width=622, border=True):
             dpg.add_group(tag="tools")  # populated dynamically
 
     dpg.add_separator()
