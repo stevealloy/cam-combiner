@@ -131,6 +131,15 @@ def _wrap_for_width(text: str, pixel_width: int) -> str:
     return "\n".join(textwrap.wrap(text, width=max_chars)) or text
 
 
+def _multiline_height(num_lines: int, min_lines: int = 1) -> int:
+    """Height in px for a readonly multiline input_text sized to its actual line count,
+    instead of a fixed guess that either leaves dead space or clips/pushes content below."""
+    size = dpg.get_text_size("M")
+    line_h = (size[1] if size else 0) or 17
+    lines = max(min_lines, num_lines)
+    return int(lines * (line_h + 4) + 10)
+
+
 def _add_selectable_text(text: str, color=None, width=-1, multiline=False, height=0):
     """A readonly input_text styled to look like plain text -- selectable/copyable, unlike add_text."""
     item = dpg.add_input_text(default_value=text, readonly=True, width=width, multiline=multiline, height=height)
@@ -233,12 +242,18 @@ def _refresh_ui(recreate_params: bool):
                                                user_data=f)
                         f.set_radiobtn(cid)
 
-    # Mirror a readable dump of params in the Options text box (handy for copy/paste)
+    # Mirror a readable dump of params + enabled features in the Options text box (handy for copy/paste)
     with dpg.group(parent="Options"):
-        dpg.add_text("Chosen Parameters:")
+        dpg.add_text("Chosen Options:")
         chosen_lines = [f"{k:20s} = {v}" for k, v in sorted(state["params"].items())]
         dpg.add_input_text(default_value="\n".join(chosen_lines), multiline=True, readonly=True,
-                           width=-1, height=192)
+                           width=-1, height=_multiline_height(len(chosen_lines)))
+
+        dpg.add_text("Enabled Features:")
+        enabled_feature_names = sorted(f.name for f in _get_enabled_features())
+        dpg.add_input_text(default_value="\n".join(enabled_feature_names) if enabled_feature_names else "(none)",
+                           multiline=True, readonly=True, width=-1,
+                           height=_multiline_height(len(enabled_feature_names)))
 
     # update_model_params:
     with dpg.group(parent="model_params"):
@@ -249,9 +264,11 @@ def _refresh_ui(recreate_params: bool):
             "   CL-to-CL    = " + str(state["cfg"]["CLINE_DELTA"]),
             "   Max Units   = " + str(state["cfg"]["MAXUNITS"]),
             "   Direction   = " + str(state["cfg"]["DIRECTION"]),
+            "   Front Step  = " + str(state["cfg"].get("FRONT-STEP", "")),
+            "   Back Step   = " + str(state["cfg"].get("BACK-STEP", "")),
         ]
         dpg.add_input_text(default_value="\n".join(model_lines), multiline=True, readonly=True,
-                           width=-1, height=96)
+                           width=-1, height=_multiline_height(len(model_lines)))
 
     with (dpg.group(parent="tools")):
         # Only available if scrollX/scrollY are disabled and stretch columns are not used
@@ -1169,7 +1186,7 @@ def set_cfg(path):
     state["param_values"]["Lefty"] = ""
     state["params"]["unit_1_only"] = False
     state["param_values"]["unit_1_only"] = ""
-    state["params"]["zip_subdirs"] = False
+    state["params"]["zip_subdirs"] = True
     state["param_values"]["zip_subdirs"] = ""
 
     params_list = cfg.get("parameters", [])
