@@ -133,11 +133,13 @@ def _wrap_for_width(text: str, pixel_width: int) -> str:
 
 def _multiline_height(num_lines: int, min_lines: int = 1) -> int:
     """Height in px for a readonly multiline input_text sized to its actual line count,
-    instead of a fixed guess that either leaves dead space or clips/pushes content below."""
+    instead of a fixed guess that either leaves dead space or clips/pushes content below.
+    The padding term is a one-time frame allowance, not per-line -- adding it per line
+    would compound into growing dead space as line count increases."""
     size = dpg.get_text_size("M")
     line_h = (size[1] if size else 0) or 17
     lines = max(min_lines, num_lines)
-    return int(lines * (line_h + 4) + 10)
+    return int(lines * line_h + 10)
 
 
 def _add_selectable_text(text: str, color=None, width=-1, multiline=False, height=0):
@@ -414,7 +416,7 @@ def run_plan(sender=None, app_data=None, user_data=None):
         name = out.get("name", "")
         step_files = by_step.get(step, [])
         files_str = "\n".join(f.name for f in step_files)
-        files_height = max(26, len(step_files) * 19 + 6)
+        files_height = _multiline_height(len(step_files))
         with dpg.table_row(parent="Outputs_table"):
             dpg.add_text(f"{step:02}")
             dpg.add_input_text(default_value=name, readonly=True, width=-1)
