@@ -4,6 +4,9 @@ from cam_core.version import GUI_BANNER, APP_BANNER, VERSION
 from cam_core.jsonc_loader import load_config_file, normalize_legacy
 from cam_core.planner import plan, scan_files
 from cam_core.writer import write_output_file
+from cam_core.tool_conflicts import find_active_tool_conflicts, format_tool_conflicts
+from cam_core.handedness import find_handedness_orphans, format_handedness_orphans
+from cam_core.consistency_checks import run_all_checks, format_check_results
 from cam_core.session import save_session, load_session
 from cam_core.debug import debug_dump_all, debug_print
 from cam_core.cam_file import CAMFile
@@ -151,9 +154,13 @@ def _refresh_ui(recreate_params: bool):
         # delete all children
         for child in list(dpg.get_item_children("Parameters", 1) or []):
             dpg.delete_item(child)
-    if recreate_params and dpg.does_item_exist("features_box"):
+    if recreate_params and dpg.does_item_exist("features_box_left"):
         # delete all children
-        for child in list(dpg.get_item_children("features_box", 1) or []):
+        for child in list(dpg.get_item_children("features_box_left", 1) or []):
+            dpg.delete_item(child)
+    if recreate_params and dpg.does_item_exist("features_box_right"):
+        # delete all children
+        for child in list(dpg.get_item_children("features_box_right", 1) or []):
             dpg.delete_item(child)
     if dpg.does_item_exist("Options"):
         # delete all children
@@ -202,22 +209,29 @@ def _refresh_ui(recreate_params: bool):
                                          callback=_on_param_change,
                                          user_data="zip_subdirs")
 
-        with dpg.group(parent="features_box"):
-            for fb in FeatureBlocks:
-                if fb.get_CAM_features() == []:
-                    continue
+        # Split feature blocks across two side-by-side columns so feature-heavy models
+        # (e.g. t-in) don't force a long single-column scroll -- each block's separator
+        # and checkboxes stay together, only which column a whole block lands in changes.
+        non_empty_blocks = [fb for fb in FeatureBlocks if fb.get_CAM_features() != []]
+        split_at = (len(non_empty_blocks) + 1) // 2
+        columns = [
+            ("features_box_left", non_empty_blocks[:split_at]),
+            ("features_box_right", non_empty_blocks[split_at:]),
+        ]
+        for parent_tag, blocks in columns:
+            with dpg.group(parent=parent_tag):
+                for fb in blocks:
+                    dpg.add_separator(label=fb.get_name())
 
-                dpg.add_separator(label=fb.get_name())
+                    for f in fb.get_CAM_features():
+                        if verbose:
+                            debug_print("trying to build button for feature:", f.name)
 
-                for f in fb.get_CAM_features():
-                    if verbose:
-                        debug_print("trying to build button for feature:", f.name)
-
-                    cid = dpg.add_checkbox(label=f.name,
-                                           default_value=False, # default OFF
-                                           callback=_toggle_feature,
-                                           user_data=f)
-                    f.set_radiobtn(cid)
+                        cid = dpg.add_checkbox(label=f.name,
+                                               default_value=False, # default OFF
+                                               callback=_toggle_feature,
+                                               user_data=f)
+                        f.set_radiobtn(cid)
 
     # Mirror a readable dump of params in the Options text box (handy for copy/paste)
     with dpg.group(parent="Options"):
@@ -252,7 +266,7 @@ def _refresh_ui(recreate_params: bool):
             # width= alone isn't honored as a literal pixel width under SizingStretchProp -- width_fixed makes it one, matching the Files-panel Tool/Step columns.
             dpg.add_table_column(label="Num", width_fixed=True, init_width_or_weight=15)
             dpg.add_table_column(label="Desc", width_fixed=True, init_width_or_weight=63)
-            dpg.add_table_column(label="Files", width_fixed=True, init_width_or_weight=527)
+            dpg.add_table_column(label="Files", width_fixed=True, init_width_or_weight=420)  # was 527, -20% given to Features
 
             for t in sorted(CAMTools, key=lambda x: int(x.tnum) if x is not None else 0):
                 tnum = t.get_tool_num()
@@ -279,7 +293,7 @@ def _refresh_ui(recreate_params: bool):
                        borders_outerV=True,
                        borders_outerH=True):
 
-            dpg.add_table_column(label="File Name", width_stretch=True, init_width_or_weight=0.6)
+            dpg.add_table_column(label="File Name", width_stretch=True, init_width_or_weight=0.48)  # was 0.6, -20% given to Features
             dpg.add_table_column(label="Tool", width_fixed=True, init_width_or_weight=36)
             dpg.add_table_column(label="Step", width_fixed=True, init_width_or_weight=32)
             dpg.add_table_column(label="Rule Match", width_stretch=True, init_width_or_weight=0.25)
@@ -333,6 +347,18 @@ def _get_enabled_features() -> list[CAMFeatures]:
             outlist.append(f)
 
     return outlist
+
+
+def _log_consistency_warnings(cam_files) -> str:
+    """Run the directory-wide consistency checks (stale headers, Z<0, missing tool,
+    tool/feed/clearance consistency within same-feature/run-index groups) and print the
+    result to the GUI Log panel via debug_print. Returns the formatted text so callers
+    that also want it written to a file (e.g. alongside tools.txt) don't have to re-run
+    the checks."""
+    results = run_all_checks(cam_files)
+    text = format_check_results(results)
+    debug_print(text)
+    return text
 
 
 def run_plan(sender=None, app_data=None, user_data=None):
@@ -394,7 +420,7 @@ def _cleanup_unit_tmp_dir():
 def _generate_output_failed(exc: Exception):
     debug_print(f"[error] Generate Output failed: {exc}")
     _cleanup_unit_tmp_dir()
-    _set_status("")
+    dpg.set_value("status_text", f"ERROR: {exc}")
     dpg.configure_item("generate_output_btn", enabled=True)
 
 
@@ -528,6 +554,16 @@ def write_output_files():
     num_steps = state["cfg"]["NUM-STEPS"]
     output_file_names = state["cfg"]["OUTPUT-FILE-NAMES"]
 
+    # Fatal error: a -lefty file with no -righty counterpart (or vice versa) means that
+    # feature's content silently vanishes from this run's output once the handedness
+    # filter drops the unwanted side, instead of it being an intentional lefty/righty
+    # swap. Caught here, before anything is written, rather than shipping incomplete output.
+    handedness_orphans = find_handedness_orphans(by_step, bool(lefty))
+    if handedness_orphans:
+        raise RuntimeError(
+            "Handedness mismatch: " + format_handedness_orphans(handedness_orphans, bool(lefty))
+        )
+
     # 1/, 2/, ..., 1to2/, ... are built on local disk and only copied/zipped to
     # base_output_dir once complete, so filling them doesn't round-trip every
     # single file through a Drive-synced output directory.
@@ -633,11 +669,24 @@ def write_output_files():
     # *************************************************************************************************
 
     # *************************************************************************************************
-    # generate a tool list to be output to the output directory, and check to see if there are any potential conflicts
-    # in tool number assignments - if the tool descriptions for two tools with the same number do not match.
+    # dump the directory-wide consistency checks (stale headers, Z<0, missing tool, tool/feed/
+    # clearance consistency within same-feature/run-index groups) to their own file too, alongside
+    # tools.txt/summary.txt, so there's a durable record and not just the GUI Log panel.
     # *************************************************************************************************
-    have_error = False
-    have_warning = False
+    warnings_text = _log_consistency_warnings(CAMFiles)
+    with open(base_output_dir + "/warnings.txt", "w", encoding="utf-8") as warnings_file:
+        warnings_file.write(warnings_text + "\n")
+
+    # *************************************************************************************************
+    # generate a tool list to be output to the output directory, and check for tool number conflicts.
+    #
+    # Reusing a tool slot across files that are NOT both part of this run is fine (e.g. several
+    # alternate options -- multiple roundover profiles, only one of which is ever active -- sharing a
+    # slot): the machine never sees the description that wasn't selected. It's only a real problem when
+    # two DIFFERENT descriptions for the same tool number are BOTH selected for output in this run,
+    # since that would mean reloading/changing the physical tool mid-project instead of loading each
+    # tool once. That case is a fatal error -- see the raise below.
+    # *************************************************************************************************
     tools_filename = base_output_dir + f"/tools.txt"
     tfile = open(tools_filename, "w")
     tfile.write("Model:" + str(model) + "\n")
@@ -651,69 +700,6 @@ def write_output_files():
     tfile.close()
     tfile = open(tools_filename, "a")
 
-    for t in sorted(CAMTools, key=lambda x: int(x.tnum) if x is not None else 0):
-        mytoolnum = t.get_tool_num()
-        mydesc = t.get_desc()
-
-        # Determine if the file in question is actually used in this run, as determined by the user-chosen options.
-        # If not, then note the potential error as a warning
-        for f in t.get_files():
-            myfilename = f.name
-
-            if False and debug_wof:
-                debug_print("********** Tool check: ", mytoolnum, myfilename, mydesc)
-
-            myfile = None
-            # get the CAMFile object for this file name
-            for cfile in CAMFiles:
-                if False and debug_wof:
-                    debug_print("checking: ", cfile.get_name(), myfilename)
-                if (cfile.get_name() == myfilename):
-                    myfile = cfile
-                    break
-
-            if myfile == None:
-                # huh? didn't find the CAM file for this. WTF?
-                debug_print("WTF. can't find my own CAM File structure! Aborting." + myfilename)
-                debug_print(CAMFiles)
-                dpg.destroy_context()
-
-        for t2 in sorted(CAMTools, key=lambda x: int(x.tnum)):
-
-            if (t2.get_tool_num() == mytoolnum):
-                # OK, this is our toolnumber before! (or this is the same tool... but no matter)
-                if t2.get_desc() != mydesc:
-                    # debug_print("error! inside ", mytoolnum, mydesc, myfilename)
-                    # this is the problem case: mark it as such
-                    t2file = None
-                    # get the CAMFile object for this file name
-                    for f2 in CAMFiles:
-                        if f2 in t2.get_files():
-                            t2file = f2
-                            break
-
-                    if t2file == None:
-                        # huh? didn't find the CAM file for this. WTF?
-                        debug_print("WTF. can't find T2 CAM File structure! Aborting.")
-                        dpg.destroy_context()
-
-                    if _is_file_enabled(t2file):
-                        have_error = True
-                        t.set_error("conflict")
-                        t2.set_error("conflict")
-                    else:
-                        have_warning = True
-                        t.set_warning("conflict")
-                        t2.set_warning("conflict")
-
-    if 0:
-        if have_warning:
-            # put some error text out the GUI to let the user know
-            dpg.set_value(error_txt, "WARNING: conflicting tool numbers. See tools.txt in the output directory.")
-        if have_error:
-            # put some error text out the GUI to let the user know
-            dpg.set_value(error_txt, "ERROR: conflicting tool numbers. See tools.txt in the output directory.")
-
     # Build one entry per unique (tnum, desc) pair across all CAM files
     tool_entries = {}
     for cfile in CAMFiles:
@@ -723,16 +709,24 @@ def write_output_files():
         key = (t.get_tool_num(), t.get_desc())
         tool_entries.setdefault(key, []).append(cfile)
 
-    tnum_descs = {}
-    for (tnum, desc) in tool_entries:
-        tnum_descs.setdefault(tnum, set()).add(desc)
+    active_conflicts = find_active_tool_conflicts(CAMFiles, _is_file_enabled)
 
     tfile.write("Used\tConflict\tTnum\tDesc\n")
     for (tnum, desc) in sorted(tool_entries.keys()):
         is_used = any(_is_file_enabled(f) for f in tool_entries[(tnum, desc)])
-        conflict = len(tnum_descs.get(tnum, set())) > 1
+        conflict = desc in active_conflicts.get(tnum, set())
         tfile.write(f"{'YES' if is_used else 'no'}\t{'CONFLICT' if conflict else ''}\tT#{tnum:02d}\t{desc}\n")
     tfile.close()
+
+    # Fatal error: two different tool descriptions both actively selected for the same tool number in
+    # this run. tools.txt above is written first regardless, so it's there to debug from.
+    if active_conflicts:
+        raise RuntimeError(
+            "Tool number conflict -- the same tool slot is assigned to different tools, and both are "
+            "selected for output in this run (would require reloading the tool mid-project instead of "
+            "loading it once):\n" + format_tool_conflicts(active_conflicts) +
+            "\nSee tools.txt in the output directory for the full tool list."
+        )
 
     # create output files by step
     for out in outputs:
@@ -972,6 +966,7 @@ def choose_base(sender, app_data):
 
     # Scan & refresh Features
     CAMFiles, FeatureBlocks, CAMFeatures, CAMTools = scan_files(state["base"], shared_dir=state["shared_dir"])
+    _log_consistency_warnings(CAMFiles)
 
     run_plan()
     _refresh_ui(True)
@@ -990,6 +985,7 @@ def choose_shared(sender, app_data):
     dpg.set_value("shared_val", state["shared_dir"])
 
     CAMFiles, FeatureBlocks, CAMFeatures, CAMTools = scan_files(state["base"], shared_dir=state["shared_dir"])
+    _log_consistency_warnings(CAMFiles)
     run_plan()
     _refresh_ui(True)
 
@@ -1025,6 +1021,7 @@ def _apply_session(path: str) -> bool:
     CAMFiles, FeatureBlocks, CAMFeatures, CAMTools = scan_files(
         state["base"], shared_dir=state["shared_dir"]
     )
+    _log_consistency_warnings(CAMFiles)
 
     # Re-enable saved features (scan created fresh CAMFeature objects)
     saved_features = set(data.get("enabled_features", []))
@@ -1244,35 +1241,51 @@ with dpg.window(label="CAM Combiner", width=2280, height=1200):
     dpg.add_separator()
 
     with dpg.group(horizontal=True, height=516):
-        with dpg.child_window(width=192, border=True):
+        # Features absorbs the width freed up by moving "Model And Fixture Parameters" /
+        # "Chosen Parameters" out of this row (see below), plus 20% trimmed from the
+        # Files table's File Name column and the Tools table's Files column -- it's the
+        # one that needed more room for feature-heavy models like t-in.
+        with dpg.child_window(width=681, border=True):
             dpg.add_text("Features", color=feature_based_color)
-            dpg.add_group(tag="features_box")  # populated dynamically
+            with dpg.group(horizontal=True):
+                # A plain dpg.group's width= does NOT constrain add_separator's label-rule
+                # (it stretches to the nearest real content region regardless) -- only an
+                # actual child_window creates that boundary, so these must be child_windows.
+                with dpg.child_window(tag="features_box_left", width=320, border=False):
+                    pass  # populated dynamically
+                with dpg.child_window(tag="features_box_right", width=320, border=False):
+                    pass  # populated dynamically
 
         with dpg.child_window(width=282, border=True):
             dpg.add_text("Parameters", color=param_based_color)
             dpg.add_group(tag="Parameters")  # populated dynamically
 
+        with dpg.child_window(width=700, border=True):
+            dpg.add_group(tag="files")  # populated dynamically
+
+        with dpg.child_window(width=515, border=True):
+            dpg.add_group(tag="tools")  # populated dynamically
+
+    dpg.add_separator()
+    # "Model And Fixture Parameters" + "Chosen Parameters" moved down here, level with
+    # StepFiles (Outputs table) and Log -- not inline with Features/Parameters/Files/Tools
+    # above -- so it never competes with Features for width in the row above.
+    with dpg.group(horizontal=True, height=-1):
         with dpg.child_window(width=282, border=True):
             dpg.add_group(tag="model_params")  # populated dynamically
             dpg.add_separator()
             dpg.add_group(tag="Options")  # populated dynamically
 
-        with dpg.child_window(width=800, border=True):
-            dpg.add_group(tag="files")  # populated dynamically
-
-        with dpg.child_window(width=622, border=True):
-            dpg.add_group(tag="tools")  # populated dynamically
-
-    dpg.add_separator()
-    with dpg.child_window(tag="Outputs_window", border=True, height=320, width=2220):
-        with dpg.table(tag="Outputs_table", header_row=True,
-                       borders_innerH=True, borders_innerV=True, borders_outerV=True, borders_outerH=True):
-            dpg.add_table_column(label="Step", width_fixed=True, init_width_or_weight=54)
-            dpg.add_table_column(label="Out Name", width_fixed=True, init_width_or_weight=324)
-            dpg.add_table_column(label="CAM Files Included", width_stretch=True)
-    dpg.add_separator()
-    with dpg.child_window(tag="Log_window", border=True, height=-1, width=2220, horizontal_scrollbar=True):
-        dpg.add_input_text(tag="Log", multiline=True, width=2160, height=-1)
+        with dpg.group(horizontal=False):
+            with dpg.child_window(tag="Outputs_window", border=True, height=320, width=-1):
+                with dpg.table(tag="Outputs_table", header_row=True,
+                               borders_innerH=True, borders_innerV=True, borders_outerV=True, borders_outerH=True):
+                    dpg.add_table_column(label="Step", width_fixed=True, init_width_or_weight=54)
+                    dpg.add_table_column(label="Out Name", width_fixed=True, init_width_or_weight=324)
+                    dpg.add_table_column(label="CAM Files Included", width_stretch=True)
+            dpg.add_separator()
+            with dpg.child_window(tag="Log_window", border=True, height=-1, width=-1, horizontal_scrollbar=True):
+                dpg.add_input_text(tag="Log", multiline=True, width=-1, height=-1)
 
 with dpg.file_dialog(directory_selector=True, show=False, callback=choose_base, tag="base_dialog", width=1200, height=600,
                      default_path=r"G:\Shared drives\AlloyProjectFiles\Customer CAD files\Alloy-Standard-Builds-CAM"):

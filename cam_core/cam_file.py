@@ -7,6 +7,20 @@ import re
 import shutil
 import tempfile
 
+_MOP_RE = re.compile(r"\(\s*MOP:\s*(.*?)\s*\)")
+# A bare "( <name>)" comment with no other content -- used as an operation-boundary
+# marker. A file that only has one is a normal single-op file (its marker usually
+# repeats the MOP: name). A file with more than one is several operations concatenated
+# back-to-back sharing one TOOL declaration (only the first gets an ( MOP: ... ) line;
+# later ones just get their own bare marker), which is worth knowing about separately
+# from a genuinely stale ( MOP: ... ) header.
+_OP_MARKER_RE = re.compile(r"^\(\s([A-Za-z0-9][A-Za-z0-9_.]*(?:-[A-Za-z0-9_.]+)*)\)\s*$")
+_X_RE = re.compile(r"X(-?[0-9]+\.?[0-9]*)")
+_Y_RE = re.compile(r"Y(-?[0-9]+\.?[0-9]*)")
+_Z_RE = re.compile(r"Z(-?[0-9]+\.?[0-9]*)")
+_F_RE = re.compile(r"F([0-9]+\.?[0-9]*)")
+_S_RE = re.compile(r"(?:^|\s)S([0-9]+)")
+
 # units numbered across X first, then step Y
 class Unit:
     def __init__(self, unit_number:int, clineX:float, deltaX:float, clineY:float, deltaY:float):
@@ -44,10 +58,14 @@ class CAMFile:
         # extracted from self.name
         self._step = "00"
 
-        if is_root:
-            self._feature_name = ""
-        else:
-            self._feature_name = self._feature_tag_from_rel()
+        self._run_suffix = None
+        # _family_tag is always computed, even for root/base files -- unlike
+        # get_feature_name() (used by the CAMFeature toggle system, which deliberately
+        # treats root files as having no feature), this is a general-purpose "what
+        # operation is this, independent of which file it is" tag used by the
+        # consistency checks to group root-level files (profile, frets, radius, ...) too.
+        self._family_tag = self._feature_tag_from_rel()
+        self._feature_name = "" if is_root else self._family_tag
 
         # extracted during file read
         self._toolnum = 0
@@ -63,7 +81,11 @@ class CAMFile:
             debug_print("New CAMFile: n:" + self.name + "D:" + directory + "====" + self._dir + " is base?")
 
         # determine the appropriate step for this file
-        match = re.search(r"^([A-Ga-g]?\d{2})-", self.name)
+        # any letter is accepted here, matching jsonc_loader.normalize_legacy()'s
+        # OUTPUT-FILE-NAMES step regex -- both sides must agree on what counts as a
+        # step prefix, or a file can match an output entry's pattern but still get
+        # bucketed under the wrong step (e.g. ThroughNeck-in's W00/W01/W02 series).
+        match = re.search(r"^([A-Za-z]?\d{2})-", self.name)
         if match is not None:
             self._step = match[1]
         else:
@@ -111,6 +133,44 @@ class CAMFile:
         if self._debug:
             debug_print("     tool: " + str(self._toolnum))
 
+        ##########################################################
+        # capture the MOP: header name (used to detect a stale header that no longer
+        # matches the file's own name) and this file's coordinate/feed/speed envelope
+        # (used for cross-file consistency checks -- clearance plane, feed/speed, etc).
+        # Comment lines are skipped for coordinates/feed/speed since they're not real
+        # toolpath motion (e.g. the FILE: header can contain path text that isn't G-code).
+        self._mop_name = None
+        self._op_markers = []
+        self._feed_rates = set()
+        for line in self._lines:
+            if self._mop_name is None:
+                mop_match = _MOP_RE.search(line)
+                if mop_match:
+                    self._mop_name = mop_match.group(1).strip()
+            marker_match = _OP_MARKER_RE.match(line.rstrip("\n"))
+            if marker_match:
+                self._op_markers.append(marker_match.group(1))
+            if "(" in line:
+                continue
+            for xm in _X_RE.finditer(line):
+                v = float(xm.group(1))
+                self.min_x = min(self.min_x, v)
+                self.max_x = max(self.max_x, v)
+            for ym in _Y_RE.finditer(line):
+                v = float(ym.group(1))
+                self.min_y = min(self.min_y, v)
+                self.max_y = max(self.max_y, v)
+            for zm in _Z_RE.finditer(line):
+                v = float(zm.group(1))
+                self.min_z = min(self.min_z, v)
+                self.max_z = max(self.max_z, v)
+            for fm in _F_RE.finditer(line):
+                self._feed_rates.add(float(fm.group(1)))
+            for sm in _S_RE.finditer(line):
+                v = int(sm.group(1))
+                self.min_s = min(self.min_s, v)
+                self.max_s = max(self.max_s, v)
+
     @classmethod
     def from_lines(cls, name: str, lines: list, is_root: bool = True) -> "CAMFile":
         """Construct a CAMFile from in-memory lines without reading from disk."""
@@ -142,8 +202,8 @@ class CAMFile:
     def _feature_tag_from_rel(self) -> str:
         part = self.name.split("/", 1)[-1] if "/" in self.name else self.filename
         stem = os.path.splitext(os.path.basename(part))[0]
-        # strip known tags
-        stem = re.sub(r"^([A-Ga-g]?\d{2})-", "", stem)
+        # strip known tags (see get_step() above for why any letter is accepted here)
+        stem = re.sub(r"^([A-Za-z]?\d{2})-", "", stem)
         stem = re.sub(r"-NODUP", "", stem)
         stem = re.sub(r"-NOMIRROR", "", stem)
         stem = re.sub(r"-front-", "-", stem)
@@ -155,12 +215,26 @@ class CAMFile:
         stem = re.sub(r"-start-", "-", stem)
         stem = re.sub(r"-start", "", stem)
 
+        # capture the run/pass number (e.g. '-01', '-02') before dropping it, so callers
+        # can tell same-feature files apart by which pass they represent (rough vs finish,
+        # etc) instead of treating e.g. a rough pass and a finish pass as directly
+        # comparable. Done after the -end/-start strip above so a number buried before one
+        # of those (e.g. '...-01-end') is still found.
+        run_match = re.search(r"-(\d\d)", stem)
+        self._run_suffix = run_match.group(1) if run_match else None
+
         # drop trailing run-like numbers that are not at start (e.g., '-01', '-02')
         stem = re.sub(r"-\d\d", "", stem)
         return stem
 
     def get_feature_name(self):
         return self._feature_name
+
+    def get_family_tag(self):
+        return self._family_tag
+
+    def get_run_suffix(self):
+        return self._run_suffix
 
     def is_root(self) -> bool:
         return self._is_root
@@ -173,6 +247,46 @@ class CAMFile:
 
     def get_name(self):
         return self.name
+
+    def has_coordinates(self) -> bool:
+        """False for placeholder/no-op files where no X/Y/Z motion was ever found."""
+        return self.min_x <= self.max_x
+
+    def get_min_x(self):
+        return self.min_x if self.has_coordinates() else None
+
+    def get_max_x(self):
+        return self.max_x if self.has_coordinates() else None
+
+    def get_min_y(self):
+        return self.min_y if self.has_coordinates() else None
+
+    def get_max_y(self):
+        return self.max_y if self.has_coordinates() else None
+
+    def get_min_z(self):
+        return self.min_z if self.has_coordinates() else None
+
+    def get_max_z(self):
+        return self.max_z if self.has_coordinates() else None
+
+    def get_min_s(self):
+        return self.min_s if self.min_s <= self.max_s else None
+
+    def get_max_s(self):
+        return self.max_s if self.min_s <= self.max_s else None
+
+    def get_feed_rates(self):
+        return frozenset(self._feed_rates)
+
+    def get_mop_name(self):
+        return self._mop_name
+
+    def get_op_markers(self):
+        """Bare '( <name>)' operation-boundary comments found in the file, in order.
+        A normal single-op file has exactly one (matching the MOP: header). More than
+        one means several operations are concatenated into this file sharing one tool."""
+        return list(self._op_markers)
 
     def create_unit_code(self,
                          numUnits: int,

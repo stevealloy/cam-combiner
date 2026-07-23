@@ -42,6 +42,12 @@ class TestFromLines:
         f = _file("03-frets-r7PT25-s21-01.nc")
         assert f.get_step() == "03"
 
+    def test_step_letter_prefix_not_limited_to_a_through_g(self):
+        # Matches jsonc_loader.normalize_legacy()'s OUTPUT-FILE-NAMES step regex,
+        # which already accepts any letter (e.g. ThroughNeck-in's W00/W01/W02 series).
+        f = _file("W01-WingPrep-01.nc")
+        assert f.get_step() == "W01"
+
     def test_front_step(self):
         # FRONT detection only fires when no leading NN- step prefix is present
         f = _file("radius-front.nc")
