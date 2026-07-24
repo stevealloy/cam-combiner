@@ -178,3 +178,109 @@ class TestPlanSelection:
         _, by_step = plan(cfg, {}, [root_f, feat_f], "", [], [])
         step_files = by_step.get("01", [])
         assert root_f in step_files
+
+
+# ---------------------------------------------------------------------------
+# plan() — alias_of fallback (single physical file standing in for whichever
+# step actually needs it, e.g. a radius-profiling pass that runs at step 02 or
+# step 03 depending on PauseAfterInlay, instead of a hand-maintained duplicate)
+# ---------------------------------------------------------------------------
+
+class TestPlanAliasOf:
+    def test_alias_used_when_own_pattern_has_no_match(self):
+        # Only the "02-" file exists on disk. The "03-" entry's own pattern finds
+        # nothing, so it falls back to alias_of and buckets the file under ITS
+        # OWN step ("03"), not the "02" step the filename itself implies.
+        f = _file("02-radius-r9PT5-AnyScale-final-01.nc")
+        cfg = _cfg("02-out.nc", "03-out.nc", base_entries=[
+            {"name": "02-radius-r9PT5-<Scale>-final", "required": "False", "condition": "!PauseAfterInlay"},
+            {"name": "03-radius-r9PT5-<Scale>-final", "alias_of": "02-radius-r9PT5-<Scale>-final",
+             "required": "False", "condition": "PauseAfterInlay"},
+        ])
+        cfg["parameters"] = [{"name": "Scale", "wildcard": "AnyScale", "values": ["s21"], "default": "s21"}]
+        params = {"PauseAfterInlay": True, "Scale": "s21"}
+        _, by_step = plan(cfg, params, [f], "", [], [])
+        assert f in by_step.get("03", [])
+        assert f not in by_step.get("02", [])
+
+    def test_direct_match_takes_priority_over_alias(self):
+        # When a genuine, distinctly-named file for the entry's own pattern exists,
+        # alias_of must never override it -- direct matches always win.
+        f02 = _file("02-radius-r9PT5-AnyScale-final-01.nc")
+        f03 = _file("03-radius-r9PT5-AnyScale-final-01.nc")
+        cfg = _cfg("02-out.nc", "03-out.nc", base_entries=[
+            {"name": "02-radius-r9PT5-<Scale>-final", "required": "False", "condition": "!PauseAfterInlay"},
+            {"name": "03-radius-r9PT5-<Scale>-final", "alias_of": "02-radius-r9PT5-<Scale>-final",
+             "required": "False", "condition": "PauseAfterInlay"},
+        ])
+        cfg["parameters"] = [{"name": "Scale", "wildcard": "AnyScale", "values": ["s21"], "default": "s21"}]
+        params = {"PauseAfterInlay": True, "Scale": "s21"}
+        _, by_step = plan(cfg, params, [f02, f03], "", [], [])
+        assert by_step.get("03", []) == [f03]
+        assert f02 not in by_step.get("03", [])
+
+    def test_alias_fallback_records_note_on_matching_search_string(self):
+        f = _file("02-radius-r9PT5-AnyScale-final-01.nc")
+        cfg = _cfg("02-out.nc", "03-out.nc", base_entries=[
+            {"name": "02-radius-r9PT5-<Scale>-final", "required": "False", "condition": "!PauseAfterInlay"},
+            {"name": "03-radius-r9PT5-<Scale>-final", "alias_of": "02-radius-r9PT5-<Scale>-final",
+             "required": "False", "condition": "PauseAfterInlay"},
+        ])
+        cfg["parameters"] = [{"name": "Scale", "wildcard": "AnyScale", "values": ["s21"], "default": "s21"}]
+        params = {"PauseAfterInlay": True, "Scale": "s21"}
+        plan(cfg, params, [f], "", [], [])
+        note = f.get_matching_search_string()
+        assert "aliased from" in note
+        assert "02-radius-r9PT5-<Scale>-final" in note
+
+    def test_direct_match_search_string_has_no_alias_note(self):
+        f03 = _file("03-radius-r9PT5-AnyScale-final-01.nc")
+        cfg = _cfg("03-out.nc", base_entries=[
+            {"name": "03-radius-r9PT5-<Scale>-final", "alias_of": "02-radius-r9PT5-<Scale>-final",
+             "required": "False", "condition": "PauseAfterInlay"},
+        ])
+        cfg["parameters"] = [{"name": "Scale", "wildcard": "AnyScale", "values": ["s21"], "default": "s21"}]
+        params = {"PauseAfterInlay": True, "Scale": "s21"}
+        plan(cfg, params, [f03], "", [], [])
+        assert "aliased from" not in f03.get_matching_search_string()
+
+    def test_no_alias_fallback_when_entrys_own_condition_false(self):
+        # alias_of only kicks in for an entry whose own condition is true. If the
+        # condition is false the entry (and its alias_of) is skipped entirely.
+        f = _file("02-radius-r9PT5-AnyScale-final-01.nc")
+        cfg = _cfg("02-out.nc", "03-out.nc", base_entries=[
+            {"name": "02-radius-r9PT5-<Scale>-final", "required": "False", "condition": "!PauseAfterInlay"},
+            {"name": "03-radius-r9PT5-<Scale>-final", "alias_of": "02-radius-r9PT5-<Scale>-final",
+             "required": "False", "condition": "PauseAfterInlay"},
+        ])
+        cfg["parameters"] = [{"name": "Scale", "wildcard": "AnyScale", "values": ["s21"], "default": "s21"}]
+        params = {"PauseAfterInlay": False, "Scale": "s21"}
+        _, by_step = plan(cfg, params, [f], "", [], [])
+        assert f not in by_step.get("03", [])
+        assert f in by_step.get("02", [])
+
+    def test_alias_does_not_mutate_underlying_file_step(self):
+        # Bucketing an aliased file under a different step is a planner-level
+        # decision only -- it must not mutate the CAMFile's own get_step().
+        f = _file("02-radius-r9PT5-AnyScale-final-01.nc")
+        cfg = _cfg("02-out.nc", "03-out.nc", base_entries=[
+            {"name": "02-radius-r9PT5-<Scale>-final", "required": "False", "condition": "!PauseAfterInlay"},
+            {"name": "03-radius-r9PT5-<Scale>-final", "alias_of": "02-radius-r9PT5-<Scale>-final",
+             "required": "False", "condition": "PauseAfterInlay"},
+        ])
+        cfg["parameters"] = [{"name": "Scale", "wildcard": "AnyScale", "values": ["s21"], "default": "s21"}]
+        params = {"PauseAfterInlay": True, "Scale": "s21"}
+        plan(cfg, params, [f], "", [], [])
+        assert f.get_step() == "02"
+
+    def test_no_alias_fallback_without_alias_of_field(self):
+        # Sanity check: an entry with no alias_of field behaves exactly as before --
+        # zero matches just means zero matches, no fallback of any kind.
+        f = _file("02-radius-r9PT5-AnyScale-final-01.nc")
+        cfg = _cfg("03-out.nc", base_entries=[
+            {"name": "03-radius-r9PT5-<Scale>-final", "required": "False", "condition": "None"},
+        ])
+        cfg["parameters"] = [{"name": "Scale", "wildcard": "AnyScale", "values": ["s21"], "default": "s21"}]
+        params = {"Scale": "s21"}
+        _, by_step = plan(cfg, params, [f], "", [], [])
+        assert by_step.get("03", []) == []

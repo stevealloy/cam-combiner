@@ -305,16 +305,45 @@ def plan(cfg: Dict[str, Any],
                 if prev is None or diff_count < prev[0]:
                     best_diff[id(m)] = (diff_count, spans)
         matches.sort(key=lambda m: _resolved_sort_key(m.name, wc_to_value))
+
+        # alias_of: if this entry's own pattern found nothing, fall back to matching
+        # a DIFFERENT pattern's files instead -- but still bucket them under THIS
+        # entry's own step (taken from patt's leading step token), not the step their
+        # filename would otherwise imply. Lets one physical file (e.g. a "final radius"
+        # pass) stand in for whichever step actually needs it depending on runtime
+        # parameters, instead of requiring a hand-maintained duplicate on disk. A real,
+        # distinctly-named file for this entry's own pattern always takes priority over
+        # the alias -- alias_of is a fallback, not a substitute for a genuine match.
+        # Single lookup level only: alias_of resolves against real scanned files, never
+        # against another entry, so no alias chain/recursion is possible.
+        alias_step = None
+        alias_of = entry.get("alias_of") if isinstance(entry, dict) else None
+        if not matches and alias_of:
+            alias_attempts, alias_wc_to_value = _render_pattern(alias_of, params, pmap)
+            for concrete, lvl in alias_attempts:
+                if verbose:
+                    debug_print(f"[debug] alias_of concrete='{concrete}'")
+                for m in _match_files(files, concrete):
+                    if id(m) not in seen:
+                        seen.add(id(m))
+                        matches.append(m)
+            matches.sort(key=lambda m: _resolved_sort_key(m.name, alias_wc_to_value))
+            if matches:
+                step_match = re.match(r"^([A-Za-z]?\d{2})", patt)
+                alias_step = step_match.group(1) if step_match else None
+                if verbose:
+                    debug_print(f"[alias] {patt} <- {alias_of}: matches={len(matches)} step={alias_step}")
+
         if verbose:
             debug_print(f"[base] {patt}: matches={len(matches)}")
         if required and not matches:
             req_missing.append(patt)
         for m in matches:
-            step = m.get_step()
+            step = alias_step or m.get_step()
             if verbose:
                 debug_print(os.path.basename(m.filename) + "==>" + str(step))
             selected_by_step.setdefault(step, []).append(m)
-            m.set_matching_search_string(patt)
+            m.set_matching_search_string(f"{patt} (aliased from {alias_of})" if alias_step else patt)
             #print("match: " + patt + str(m.name))
 
     # For files that never got a full match against any in-play base pattern,

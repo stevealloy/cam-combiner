@@ -269,7 +269,8 @@ this base entry when both `FretStepAlone` and `UseAggregateFrets` are false.
 {
   "name": "05-profile-<Scale>-<NutWidth>-<NutSlot>-<HeelShape>-<NumFrets>",
   "required": "True",   // if true and nothing matches, a warning is logged (does not abort the run)
-  "condition": "None"   // see §6.3
+  "condition": "None",  // see §6.3
+  "alias_of": null       // optional -- see below
 }
 ```
 
@@ -280,6 +281,19 @@ i.e. `05-profile-s21-nw43-Gibson-Inglewood-NFrets22` matches any file
 starting with that string followed by `-` or `.` (so trailing run numbers,
 suffixes, and extensions are all fine). See [§7](#7-how-planning-works) for
 exactly how matches are found, unioned, and ordered.
+
+**`alias_of`** (optional): a second pattern, same `<Token>` syntax as `name`,
+used only as a fallback when this entry's own `name` pattern matches nothing.
+It's meant for operations where a single physical file has to serve whichever
+step actually needs it depending on other parameters — e.g. a radius-profiling
+pass that runs at step 02 or step 03 depending on `PauseAfterInlay`, instead of
+manually copy-pasting the same CAM file under two step-prefixed names. Files
+found via `alias_of` are bucketed under *this* entry's own step (taken from the
+leading step digits of its `name`, not the step the matched file's own filename
+implies). A genuine direct match for the entry's own `name` always takes
+priority over the alias — `alias_of` only ever fires when the direct match
+count is zero. Resolution is a single lookup against real scanned files, not
+against another config entry, so alias chains/recursion aren't possible.
 
 ### 6.5 `OUTPUT-FILE-NAMES`
 
