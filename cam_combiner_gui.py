@@ -15,7 +15,7 @@ from cam_core.Tool import Tool
 from cam_core.FeatureBlock import FeatureBlock
 
 import dearpygui.dearpygui as dpg  # type: ignore
-import os, re, shutil, tempfile, textwrap
+import os, re, shutil, tempfile, textwrap, csv
 
 print(GUI_BANNER)
 print("="*40)
@@ -636,54 +636,39 @@ def write_output_files():
 
     output_file.write("**************************************************************\n\n")
 
-
-    if (0):
-        output_file.write("**************************************************************\n")
-        output_file.write("**********OutputFileContents**********************************\n")
-        for stepnum in range(0, config.NumSteps):
-            output_file.write(config.output_file_names[stepnum] + ":\n")
-            for j in file_list[i]:
-                output_file.write("\t" + j.name + "\tT" + str(j.get_toolnum()) + "\n")
-
-        output_file.write("**************************************************************\n\n")
-
-        output_file.write("**************************************************************\n")
-        output_file.write("**********CAMFiles********************************************\n")
-        for f in CAMFiles:
-            config.input_dir = str(f.get_dir())
-            output_file.write("CAM file: " + config.input_dir + "\\" + f.name())
-            output_file.write("\n")
-
-        output_file.write("**************************************************************\n\n")
-
-    if (0):
-        output_file.write("**************************************************************\n")
-        output_file.write("**********CAMFiles: stats**************************************\n")
-        output_file.write("XMin\tXMax\tYMin\tYMax\tZMin\tZMax")
-        output_file.write("\tTNUM")
-        output_file.write("\tSMin\tSMax")
-        output_file.write("\tFileName\n")
-
-        for f in CAMFiles:
-            output_file.write(str(f.min_x))
-            output_file.write("\t" + str(f.max_x))
-            output_file.write("\t" + str(f.min_y))
-            output_file.write("\t" + str(f.max_y))
-            output_file.write("\t" + str(fmin_z))
-            output_file.write("\t" + str(f.max_z))
-            output_file.write("\t" + str(f.get_toolnum()))
-            output_file.write("\t" + str(f.min_s))
-            output_file.write("\t" + str(f.max_s))
-            output_file.write("\t" + str(f))
-            output_file.write("\n")
-
-        output_file.write("**************************************************************\n\n")
-
-
     # *************************************************************************************************
     # And close the summary file.
     # *************************************************************************************************
     output_file.close()
+
+    # *************************************************************************************************
+    # Dump the same OutputFileNames -> source-file mapping as a proper CSV, with each
+    # source file's tool number and X/Y/Z/S min/max -- unlike the old tab-delimited
+    # summary.txt block this replaces, a real CSV can be opened in Excel/etc. and sorted/
+    # filtered per column instead of being visually hard to parse.
+    # *************************************************************************************************
+    if debug_wof:
+        print("********** Dumping files.csv file")
+    with open(base_output_dir + "/" + "files.csv", "w", newline="") as csv_file:
+        writer = csv.writer(csv_file)
+        writer.writerow(["OutputStep", "OutputFile", "SourceFile", "ToolNum",
+                          "XMin", "XMax", "YMin", "YMax", "ZMin", "ZMax", "SMin", "SMax"])
+        used_ids = set()
+        for out in outputs:
+            stepnum = out["step"]
+            for f in by_step.get(stepnum, []):
+                used_ids.add(id(f))
+                writer.writerow([stepnum, out["name"], f.name, f.get_toolnum(),
+                                  f.get_min_x(), f.get_max_x(), f.get_min_y(), f.get_max_y(),
+                                  f.get_min_z(), f.get_max_z(), f.get_min_s(), f.get_max_s()])
+        # Every other scanned file (not selected into any output this run) -- OutputStep/
+        # OutputFile left blank so the used files (which have them) sort to the top.
+        for f in CAMFiles:
+            if id(f) in used_ids:
+                continue
+            writer.writerow(["", "", f.name, f.get_toolnum(),
+                              f.get_min_x(), f.get_max_x(), f.get_min_y(), f.get_max_y(),
+                              f.get_min_z(), f.get_max_z(), f.get_min_s(), f.get_max_s()])
     # *************************************************************************************************
     # *************************************************************************************************
 
