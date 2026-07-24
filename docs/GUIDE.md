@@ -205,6 +205,12 @@ A full worked example lives at `Testing/Fingerboards-in/fixture_config.txt`.
   "MAXUNITS": 5,           // max units the fixture can hold; "Unit 1 Only" overrides to 1
   "DIRECTION": "VERTICAL", // duplication axis: HORIZONTAL (X, bodies) or VERTICAL (Y, necks/fingerboards)
 
+  "DESCRIPTION": "Fingerboard fixture: slotting, inlay, radius, profile.",
+                            // optional -- free-text, shown in a small readonly panel next
+                            // to the base-directory block in the GUI. Purely informational,
+                            // not read by the planner. Multi-line text (embedded \n) is
+                            // rendered as-is, one GUI line per source line.
+
   "PARAMETERS": [ /* see §6.2 */ ],
   "INPUT-FILE-NAME-BASES": [ /* see §6.4 */ ],
 
@@ -234,10 +240,15 @@ when only those are present, so existing configs don't need to be rewritten.
 ```jsonc
 {
   "name": "NutWidth",              // token name, used as <NutWidth> in patterns
-  "block": "Shape",                // GUI grouping label (cosmetic only)
+  "block": "Shape",                // GUI grouping label -- parameters sharing a block are
+                                    // rendered together in the Parameters panel with a
+                                    // separator line (labeled with the block name) before
+                                    // the first parameter of each new block
   "values": ["nw38","nw41","nw43"],// dropdown choices — include any fixed literal prefix (e.g. "nw")
   "wildcard": "AnyNutWidth",       // placeholder text used in generic/base file names; "" disables wildcarding
-  "default": "nw43"                // pre-selected value
+  "default": "nw43",               // pre-selected value
+  "help": "Width of the nut slot, in mm."  // optional -- shown as a hover tooltip on the
+                                    // parameter's label/checkbox in the GUI; omit for no tooltip
 }
 ```
 

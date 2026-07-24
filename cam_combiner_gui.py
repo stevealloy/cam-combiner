@@ -32,6 +32,8 @@ state = {
     "cfg": None,                # static config file
     "params": {},               # dynamic value of config paramaters
     "param_values": {},         # dynamic value of string to use in gui for choices
+    "param_block": {},          # config parameter name -> its "block" grouping label
+    "param_help": {},           # config parameter name -> its "help" tooltip text
     "shared_dir": None,
     "json_name": "",            # stem of the session JSON file (no extension)
     "_unit_tmp_dir": None,      # local scratch dir holding 1/, 1toN/, ... while being built
@@ -45,6 +47,7 @@ feat_color = (255, 255, 255, 255) # white
 enabled_tool_color =  (255, 255, 0, 255) #
 unmatched_color = (120, 120, 120, 255)  # gray: shades out root files with no Rule Match
 mismatch_highlight_color = (255, 140, 0, 255)  # orange: the part of the name that diverged
+help_indicator_color = (100, 170, 220, 255)  # muted cyan: "?" marker on parameters with help text
 status_color = (255, 200, 0, 255)  # amber: "Generate Output" is currently running
 
 CAMFiles: list[CAMFile] = []           # CAMFile objects
@@ -150,6 +153,17 @@ def _add_selectable_text(text: str, color=None, width=-1, multiline=False, heigh
     return item
 
 
+def _add_help_marker(text: str, parent=None):
+    """Small "?" indicator with a hover tooltip -- only rendered when help text is
+    configured, so parameters without a "help" string look unchanged."""
+    if not text:
+        return
+    kwargs = {"parent": parent} if parent is not None else {}
+    marker = dpg.add_text("(?)", color=help_indicator_color, **kwargs)
+    with dpg.tooltip(marker):
+        dpg.add_text(text, wrap=400)
+
+
 def _set_status(stage: str):
     # No forced render here: reentrant dpg.render_dearpygui_frame() calls crashed (0xC0000005) -- callers defer via dpg.set_frame_callback() instead.
     dpg.set_value("status_text", f"Working: {stage}..." if stage else "")
@@ -181,6 +195,10 @@ def _refresh_ui(recreate_params: bool):
         # delete all children
         for child in list(dpg.get_item_children("model_params", 1) or []):
             dpg.delete_item(child)
+    if dpg.does_item_exist("model_description"):
+        # delete all children
+        for child in list(dpg.get_item_children("model_description", 1) or []):
+            dpg.delete_item(child)
     if dpg.does_item_exist("files"):
         # delete all children
         for child in list(dpg.get_item_children("files", 1) or []):
@@ -193,9 +211,14 @@ def _refresh_ui(recreate_params: bool):
     # Only recreate the Parameters and Features sections on request (they are "stateful")
     if recreate_params:
         with dpg.group(horizontal=False, parent="Parameters"):
+            last_block = None
             for p in state["params"]:
                 if p == "zip_subdirs":
                     continue  # rendered alongside unit_1_only below
+                block = state["param_block"].get(p)
+                if block and block != last_block:
+                    dpg.add_separator(label=block, parent="Parameters")
+                    last_block = block
                 with dpg.group(horizontal=True, parent="Parameters"):
                      # Label + combo per parameter
                     if state["param_values"][p] == "":
@@ -203,8 +226,10 @@ def _refresh_ui(recreate_params: bool):
                                          default_value=bool(state["params"].get(p, False)),
                                          callback=_on_param_change,
                                          user_data=p)
+                        _add_help_marker(state["param_help"].get(p))
                     else:
                         dpg.add_text(p, color=param_based_color)
+                        _add_help_marker(state["param_help"].get(p))
                         dpg.add_combo(
                             tag=f"param_{p}",
                             items=state["param_values"][p],
@@ -256,6 +281,15 @@ def _refresh_ui(recreate_params: bool):
         dpg.add_input_text(default_value="\n".join(enabled_feature_names) if enabled_feature_names else "(none)",
                            multiline=True, readonly=True, width=-1,
                            height=_multiline_height(len(enabled_feature_names)))
+
+    # update_model_description: top-level config "DESCRIPTION" text, next to the base
+    # directory block -- purely informational, no config field references this.
+    with dpg.group(parent="model_description"):
+        dpg.add_text("Description:")
+        description = str((state["cfg"] or {}).get("DESCRIPTION", "")).strip()
+        desc_lines = description.splitlines() if description else ["(none)"]
+        dpg.add_input_text(default_value="\n".join(desc_lines), multiline=True, readonly=True,
+                           width=-1, height=_multiline_height(len(desc_lines)))
 
     # update_model_params:
     with dpg.group(parent="model_params"):
@@ -1169,6 +1203,8 @@ def set_cfg(path):
 
     # Build defaults & GUI pulldowns from cfg parameters
     state["params"] = {}
+    state["param_block"] = {}
+    state["param_help"] = {}
     state["params"]["Lefty"] = False
     state["param_values"]["Lefty"] = ""
     state["params"]["unit_1_only"] = False
@@ -1198,6 +1234,12 @@ def set_cfg(path):
         # Seed state with defaults
         state["params"][name] = default_str
         state["param_values"][name] = items_str
+        block = p.get("block")
+        if block:
+            state["param_block"][name] = str(block)
+        help_text = p.get("help")
+        if help_text:
+            state["param_help"][name] = str(help_text)
 
     run_plan()
     _refresh_ui(True)
@@ -1236,6 +1278,9 @@ with dpg.window(label="CAM Combiner", width=2280, height=1200):
                 dpg.add_combo(tag="session_combo", items=[], width=420)
                 dpg.add_button(label="Load", callback=_load_selected_session)
                 dpg.add_button(label="Save", callback=_save_current_session_manual)
+
+        with dpg.child_window(width=-1, height=140, border=True):
+            dpg.add_group(tag="model_description")  # populated dynamically
 
     dpg.add_separator()
     with dpg.group(horizontal=True, parent="Parameters"):
