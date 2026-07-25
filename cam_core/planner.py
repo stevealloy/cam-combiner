@@ -9,6 +9,14 @@ from cam_core.CAMFeature import CAMFeature
 from cam_core.Tool import Tool
 from cam_core.FeatureBlock import FeatureBlock
 
+def _is_none_value(v: Any) -> bool:
+    """True if a resolved parameter value is that parameter's "no such feature"
+    sentinel -- the literal "None", or a prefixed variant like "rNone"/"sdNone"/
+    "NFretsNone" (the same convention consistency_checks.py's _PARAM_SEGMENT_RE
+    already recognizes as a parametric "none" placeholder)."""
+    return isinstance(v, str) and (v == "None" or v.endswith("None"))
+
+
 def _param_lookup(parameters: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
     out = {}
     for p in parameters:
@@ -283,6 +291,18 @@ def plan(cfg: Dict[str, Any],
             debug_print(f"[cond] {patt}: {cond or 'None'} => {ok}")
         if not ok:
             continue
+
+        # If any token this pattern references currently resolves to its
+        # parameter's "none" sentinel (Inlay="None", Radius="rNone", ...), the
+        # operation was intentionally turned off for this run -- satisfied with
+        # zero files and no warning, instead of requiring a hand-maintained
+        # placeholder .nc file on disk just to give the pattern something to match.
+        pattern_tokens = re.findall(r"<([A-Za-z_]\w*)(?::(?:lower|upper))?>", patt)
+        if any(_is_none_value(params.get(t)) for t in pattern_tokens):
+            if verbose:
+                debug_print(f"[base] {patt}: a token is a 'None' sentinel -- satisfied, 0 files")
+            continue
+
         # Wildcard substitutions are treated as base files: every attempt level
         # (exact and each wildcard combination) is searched and matches are
         # unioned, rather than stopping once the exact match is found. Matches

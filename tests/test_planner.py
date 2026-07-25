@@ -284,3 +284,68 @@ class TestPlanAliasOf:
         params = {"Scale": "s21"}
         _, by_step = plan(cfg, params, [f], "", [], [])
         assert by_step.get("03", []) == []
+
+
+class TestPlanNoneSentinel:
+    def test_none_value_satisfies_required_with_zero_files(self):
+        # No file on disk matches this pattern at all -- previously this would
+        # need a hand-maintained placeholder .nc file to avoid a "required
+        # missing" warning; now Inlay="None" alone satisfies it with 0 files.
+        cfg = _cfg("02-out.nc", base_entries=[
+            {"name": "02-inlay-<Inlay>-<InlayDepth>-<Scale>", "required": "True", "condition": "None"}
+        ])
+        cfg["parameters"] = [
+            {"name": "Inlay", "wildcard": "AnyInlay", "values": ["None", "Dot6mm"], "default": "None"},
+            {"name": "InlayDepth", "wildcard": "AnyIDepth", "values": ["idPT09"], "default": "idPT09"},
+            {"name": "Scale", "wildcard": "AnyScale", "values": ["s21"], "default": "s21"},
+        ]
+        params = {"Inlay": "None", "InlayDepth": "idPT09", "Scale": "s21"}
+        _, by_step = plan(cfg, params, [], "", [], [])
+        assert by_step.get("02", []) == []
+
+    def test_none_value_ignores_a_stray_matching_placeholder_file(self):
+        # Even if an old placeholder file matching the None-valued pattern still
+        # exists on disk, it must NOT be selected -- the entry is skipped before
+        # any file matching is attempted, so leftover placeholders become inert.
+        f = _file("02-inlay-None-AnyIDepth-AnyScale.nc")
+        cfg = _cfg("02-out.nc", base_entries=[
+            {"name": "02-inlay-<Inlay>-<InlayDepth>-<Scale>", "required": "True", "condition": "None"}
+        ])
+        cfg["parameters"] = [
+            {"name": "Inlay", "wildcard": "AnyInlay", "values": ["None", "Dot6mm"], "default": "None"},
+            {"name": "InlayDepth", "wildcard": "AnyIDepth", "values": ["idPT09"], "default": "idPT09"},
+            {"name": "Scale", "wildcard": "AnyScale", "values": ["s21"], "default": "s21"},
+        ]
+        params = {"Inlay": "None", "InlayDepth": "idPT09", "Scale": "s21"}
+        _, by_step = plan(cfg, params, [f], "", [], [])
+        assert f not in by_step.get("02", [])
+
+    def test_prefixed_none_variant_also_satisfies(self):
+        # Radius's "no radius" value is "rNone", not the bare literal "None" --
+        # the prefixed-variant convention (rNone/sdNone/NFretsNone/...) must
+        # trigger the same zero-files-satisfied behavior.
+        cfg = _cfg("02-out.nc", base_entries=[
+            {"name": "02-radius-<Radius>-<Scale>-final", "required": "True", "condition": "None"}
+        ])
+        cfg["parameters"] = [
+            {"name": "Radius", "wildcard": "AnyRadius", "values": ["rNone", "r12"], "default": "rNone"},
+            {"name": "Scale", "wildcard": "AnyScale", "values": ["s21"], "default": "s21"},
+        ]
+        params = {"Radius": "rNone", "Scale": "s21"}
+        _, by_step = plan(cfg, params, [], "", [], [])
+        assert by_step.get("02", []) == []
+
+    def test_non_none_value_still_matches_normally(self):
+        # Regression check: a real (non-"None") value must still select its file.
+        f = _file("02-inlay-Dot6mm-idPT09-s21.nc")
+        cfg = _cfg("02-out.nc", base_entries=[
+            {"name": "02-inlay-<Inlay>-<InlayDepth>-<Scale>", "required": "True", "condition": "None"}
+        ])
+        cfg["parameters"] = [
+            {"name": "Inlay", "wildcard": "AnyInlay", "values": ["None", "Dot6mm"], "default": "None"},
+            {"name": "InlayDepth", "wildcard": "AnyIDepth", "values": ["idPT09"], "default": "idPT09"},
+            {"name": "Scale", "wildcard": "AnyScale", "values": ["s21"], "default": "s21"},
+        ]
+        params = {"Inlay": "Dot6mm", "InlayDepth": "idPT09", "Scale": "s21"}
+        _, by_step = plan(cfg, params, [f], "", [], [])
+        assert f in by_step.get("02", [])

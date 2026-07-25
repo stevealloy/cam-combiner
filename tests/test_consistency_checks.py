@@ -99,6 +99,22 @@ def test_matching_header_is_silent():
     assert check_stale_headers([f]) == []
 
 
+def test_header_with_extension_matching_full_filename_is_silent():
+    # Some post-processors write MOP: with the ".nc" extension included -- that's
+    # a legitimate CAM-software convention, not a stale header, as long as it
+    # matches the file's own full filename (not some other file's).
+    f = _file("01-backprep-face-PT125-NOMIRROR.nc", mop_name="01-backprep-face-PT125-NOMIRROR.nc")
+    assert check_stale_headers([f]) == []
+
+
+def test_header_with_wrong_extension_included_is_still_flagged():
+    # The extension-included form is only exempted when it matches THIS file's
+    # own name -- a stale reference to a different file is still a real bug.
+    f = _file("01-backprep-face-PT125-NOMIRROR.nc", mop_name="01-backprep-face-PT19-NOMIRROR.nc")
+    warnings = check_stale_headers([f])
+    assert len(warnings) == 1
+
+
 # ---------------------------------------------------------------------------
 # check_below_zero
 # ---------------------------------------------------------------------------

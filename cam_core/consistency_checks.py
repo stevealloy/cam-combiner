@@ -40,14 +40,20 @@ def check_stale_headers(cam_files: List[CAMFile]) -> List[str]:
     A multi-op file (see check_multi_op_files) is expected to have its MOP: name equal
     to <filename stem><a single trailing letter, e.g. 'a'> -- that's the normal way its
     first concatenated segment gets named, not a stale header, so it's excluded here.
+
+    Some post-processors write the MOP: header with the trailing ".nc" extension
+    included (matching the full filename, not just its stem) -- that's a legitimate,
+    consistently-applied convention from the CAM software itself, not a stale header,
+    so a header equal to either the stem or the full filename is accepted.
     """
     warnings = []
     for f in cam_files:
         mop = f.get_mop_name()
         if mop is None:
             continue
-        stem = f.name.rsplit("/", 1)[-1].rsplit(".", 1)[0]
-        if mop == stem:
+        filename = f.name.rsplit("/", 1)[-1]
+        stem = filename.rsplit(".", 1)[0]
+        if mop == stem or mop == filename:
             continue
         if len(f.get_op_markers()) > 1 and mop.startswith(stem) and _SEGMENT_SUFFIX_RE.match(mop[len(stem):]):
             continue
