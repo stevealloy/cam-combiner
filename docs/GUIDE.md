@@ -112,6 +112,18 @@ just `standard` highlighted, while `01-standard-...-bt1-00.nc` (`PinType`
 
 ![Files panel close-up: matched rows in red with a Rule Match pattern, unmatched rows shaded gray with only the diverging token(s) highlighted in orange](images/files-panel-rulematch.png)
 
+Among unmatched root files, ones that could **never** match under *any*
+combination of parameter values (not just the current selection) are shown in
+red instead of gray, in both the Files panel's "File Name" column and the
+Tools panel's "Files" column — a strong signal of truly stale/dead code left
+in the base directory (e.g. a file using a value no longer in a parameter's
+`values` list). This reachability check (`cam_core/reachability.py`) only
+depends on the scanned files and config, not the current parameter selection,
+so it's computed once per directory/config load, not on every parameter
+tweak. It only covers root/base files matched via `INPUT-FILE-NAME-BASES` —
+feature files (in subfolders) are toggled directly by the user, not gated by
+parameter combinations, so "unreachable" doesn't apply to them the same way.
+
 The **Tools** panel (right) lists every tool number/description pair found
 across all files, highlighting ones that are part of the current plan, and
 flagging tool-number conflicts (same number, different description).

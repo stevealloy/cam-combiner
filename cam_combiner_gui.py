@@ -7,6 +7,7 @@ from cam_core.writer import write_output_file
 from cam_core.tool_conflicts import find_active_tool_conflicts, format_tool_conflicts
 from cam_core.handedness import find_handedness_orphans, format_handedness_orphans
 from cam_core.consistency_checks import run_all_checks, format_check_results
+from cam_core.reachability import find_unreachable_base_files
 from cam_core.session import save_session, load_session
 from cam_core.debug import debug_dump_all, debug_print
 from cam_core.cam_file import CAMFile
@@ -37,6 +38,8 @@ state = {
     "shared_dir": None,
     "json_name": "",            # stem of the session JSON file (no extension)
     "_unit_tmp_dir": None,      # local scratch dir holding 1/, 1toN/, ... while being built
+    "unreachable_ids": set(),  # id() of root CAMFiles unreachable by ANY parameter combo
+    "_unreachable_cache_key": None,  # (id(CAMFiles), id(cfg)) the above was computed for
 }
 
 param_based_color = (255, 0, 0, 255)  # red
@@ -48,6 +51,7 @@ enabled_tool_color =  (255, 255, 0, 255) #
 unmatched_color = (120, 120, 120, 255)  # gray: shades out root files with no Rule Match
 mismatch_highlight_color = (255, 140, 0, 255)  # orange: the part of the name that diverged
 help_indicator_color = (100, 170, 220, 255)  # muted cyan: "?" marker on parameters with help text
+dead_code_color = (220, 60, 60, 255)  # red: root file unreachable by ANY parameter combination
 status_color = (255, 200, 0, 255)  # amber: "Generate Output" is currently running
 
 CAMFiles: list[CAMFile] = []           # CAMFile objects
@@ -94,20 +98,22 @@ def _is_file_enabled(file_target: CAMFile)->bool:
     return False
 
 
-def _add_unmatched_name_text(name: str, spans):
-    # Gray with only the given (start,end) spans in orange; selectable unless there's a span (input_text can't mix colors in one widget).
+def _add_unmatched_name_text(name: str, spans, base_color=unmatched_color):
+    # base_color (gray by default, red for files unreachable by any parameter
+    # combo) with only the given (start,end) spans in orange; selectable unless
+    # there's a span (input_text can't mix colors in one widget).
     if not spans:
-        _add_selectable_text(name, color=unmatched_color)
+        _add_selectable_text(name, color=base_color)
         return
     with dpg.group(horizontal=True, horizontal_spacing=0):
         pos = 0
         for start, end in sorted(spans):
             if start > pos:
-                dpg.add_text(name[pos:start], color=unmatched_color)
+                dpg.add_text(name[pos:start], color=base_color)
             dpg.add_text(name[start:end], color=mismatch_highlight_color)
             pos = end
         if pos < len(name):
-            dpg.add_text(name[pos:], color=unmatched_color)
+            dpg.add_text(name[pos:], color=base_color)
 
 
 _text_themes = {}  # color -> bound theme, memoized so we don't rebuild identical themes per cell
@@ -331,6 +337,8 @@ def _refresh_ui(recreate_params: bool):
                         for f in t.get_files():
                             if _is_file_enabled(f):
                                 _add_selectable_text(f.name, color=enabled_tool_color)
+                            elif id(f) in state["unreachable_ids"]:
+                                _add_selectable_text(f.name, color=dead_code_color)
                             else:
                                 _add_selectable_text(f.name)
 
@@ -370,8 +378,13 @@ def _refresh_ui(recreate_params: bool):
                             # No base pattern matched this file: shade it out and
                             # highlight only the token(s) that diverge from the
                             # closest candidate pattern, so it's easy to spot why.
+                            # A file no combination of parameters could EVER match
+                            # (truly dead code left in the base directory, not just
+                            # unmatched under the current selection) gets a distinct
+                            # color instead of the plain "unmatched" gray.
                             unmatched = True
-                            txt_color = unmatched_color
+                            is_dead = id(f) in state["unreachable_ids"]
+                            txt_color = dead_code_color if is_dead else unmatched_color
                             diff_spans = f.get_match_diff_spans()
                     else:
                         txt_color = root_non_param_color
@@ -381,9 +394,9 @@ def _refresh_ui(recreate_params: bool):
 
                 with dpg.table_row():
                     if unmatched:
-                        _add_unmatched_name_text(f.name, diff_spans)
-                        _add_selectable_text(tnum, color=unmatched_color)
-                        _add_selectable_text(step, color=unmatched_color)
+                        _add_unmatched_name_text(f.name, diff_spans, base_color=txt_color)
+                        _add_selectable_text(tnum, color=txt_color)
+                        _add_selectable_text(step, color=txt_color)
                     else:
                         _add_selectable_text(f.name, color=txt_color)
                         _add_selectable_text(tnum)
@@ -441,6 +454,18 @@ def run_plan(sender=None, app_data=None, user_data=None):
                              enabled_features,
                              verbose=False)
 
+    # Reachability (is this root file selectable by ANY parameter combination at
+    # all, not just the current one?) only depends on the scanned files + config,
+    # not on the current parameter selection -- cache it per (CAMFiles, cfg) so
+    # every param/feature toggle doesn't re-run the (still nontrivial) scan.
+    cache_key = (id(CAMFiles), id(cfg))
+    if state["_unreachable_cache_key"] != cache_key:
+        base_entries = cfg.get("base_selection", {}).get("input_file_base_names", [])
+        parameters = cfg.get("parameters", [])
+        root_files = [f for f in CAMFiles if f.is_root()]
+        unreachable = find_unreachable_base_files(root_files, base_entries, parameters)
+        state["unreachable_ids"] = {id(f) for f in unreachable}
+        state["_unreachable_cache_key"] = cache_key
 
     # List the planned file outputs to the "Outputs" window
     dpg.delete_item("Outputs_table", children_only=True, slot=1)
