@@ -633,6 +633,14 @@ def _zip_unit_subdirs(src_dir, dest_dir, units_to_produce):
             os.remove(zip_base + ".zip")
         shutil.make_archive(zip_base, "zip", subdir)
 
+        # A prior run with zip_subdirs off (or a manual unzip) can leave an
+        # unzipped copy of this same unit sitting next to the zip we just
+        # wrote -- now stale since the zip is the current output, remove it
+        # so the two don't silently drift apart.
+        unzipped_dir = os.path.join(dest_dir, name)
+        if os.path.isdir(unzipped_dir):
+            shutil.rmtree(unzipped_dir)
+
 
 def _copy_unit_subdirs(src_dir, dest_dir, units_to_produce):
     """Copy each per-unit/1toN subdir tree from src_dir into dest_dir."""
