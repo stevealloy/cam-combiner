@@ -2,7 +2,7 @@ import errno
 
 from cam_core.version import GUI_BANNER, APP_BANNER, VERSION
 from cam_core.jsonc_loader import load_config_file, normalize_legacy
-from cam_core.planner import plan, scan_files
+from cam_core.planner import plan, scan_files, format_missing_required_patterns
 from cam_core.writer import write_output_file
 from cam_core.tool_conflicts import find_active_tool_conflicts, format_tool_conflicts
 from cam_core.handedness import find_handedness_orphans, format_handedness_orphans
@@ -446,13 +446,19 @@ def run_plan(sender=None, app_data=None, user_data=None):
         for f in enabled_features:
             debug_print(f.name())
 
+    req_missing = []
     resolved, by_step = plan(cfg,
                              state["params"],
                              CAMFiles,
                              state["base"],
                              FeatureBlocks,
                              enabled_features,
-                             verbose=False)
+                             verbose=False,
+                             req_missing_out=req_missing)
+    # Live preview keeps working even when a required pattern currently has
+    # no match (e.g. mid-edit) -- only Generate Output (write_output_files())
+    # actually enforces this, via the cached list here.
+    state["req_missing"] = req_missing
 
     # Reachability (is this root file selectable by ANY parameter combination at
     # all, not just the current one?) only depends on the scanned files + config,
@@ -631,6 +637,16 @@ def write_output_files():
     base_output_dir = state["output_base"]
     num_steps = state["cfg"]["NUM-STEPS"]
     output_file_names = state["cfg"]["OUTPUT-FILE-NAMES"]
+
+    # Fatal error: a required base pattern (fixture_config.txt's "required": true)
+    # matched no file at all for the current parameter selection. Used to be a
+    # logged warning only, letting a run silently ship incomplete/wrong output;
+    # caught here, before anything is written, so nothing gets generated instead.
+    # req_missing is populated by the most recent run_plan() (see there) so it
+    # reflects the exact selection currently shown in the Outputs table.
+    req_missing = state.get("req_missing") or []
+    if req_missing:
+        raise RuntimeError(format_missing_required_patterns(req_missing))
 
     # Fatal error: a -lefty file with no -righty counterpart (or vice versa) means that
     # feature's content silently vanishes from this run's output once the handedness

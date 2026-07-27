@@ -4,7 +4,7 @@ Uses CAMFile.from_lines() so no real .nc files are needed.
 """
 import pytest
 from cam_core.cam_file import CAMFile
-from cam_core.planner import plan
+from cam_core.planner import plan, format_missing_required_patterns
 from cam_core.jsonc_loader import normalize_legacy
 
 
@@ -349,3 +349,155 @@ class TestPlanNoneSentinel:
         params = {"Inlay": "Dot6mm", "InlayDepth": "idPT09", "Scale": "s21"}
         _, by_step = plan(cfg, params, [f], "", [], [])
         assert f in by_step.get("02", [])
+
+
+# ---------------------------------------------------------------------------
+# plan() — req_missing_out (required base patterns that matched nothing)
+#
+# plan() itself never raises -- callers that want this to be fatal (Generate
+# Output, via write_output_files() in cam_combiner_gui.py) check the list
+# passed in via req_missing_out and raise themselves, so the live-preview
+# call path (re-run on every parameter/feature tweak) keeps working mid-edit.
+# ---------------------------------------------------------------------------
+
+class TestPlanRequiredMissing:
+    def test_req_missing_out_untouched_when_nothing_required_is_missing(self):
+        f = _file("01-backprep-s21-ftPT30-01.nc")
+        cfg = _cfg("01-out.nc", base_entries=[
+            {"name": "01-backprep-s21-ftPT30", "required": "True", "condition": "None"}
+        ])
+        req_missing = []
+        plan(cfg, {}, [f], "", [], [], req_missing_out=req_missing)
+        assert req_missing == []
+
+    def test_req_missing_out_populated_for_one_missing_required_pattern(self):
+        cfg = _cfg("01-out.nc", base_entries=[
+            {"name": "01-backprep-s21-ftPT30", "required": "True", "condition": "None"}
+        ])
+        req_missing = []
+        plan(cfg, {}, [], "", [], [], req_missing_out=req_missing)
+        assert req_missing == ["01-backprep-s21-ftPT30"]
+
+    def test_req_missing_out_discovers_all_missing_patterns_not_just_first(self):
+        # Two required patterns, neither matched by anything in the scanned
+        # file list -- both must be reported, not just the first one hit.
+        cfg = _cfg("01-out.nc", "02-out.nc", base_entries=[
+            {"name": "01-backprep-s21-ftPT30", "required": "True", "condition": "None"},
+            {"name": "02-radius-r12-s21-final", "required": "True", "condition": "None"},
+        ])
+        req_missing = []
+        plan(cfg, {}, [], "", [], [], req_missing_out=req_missing)
+        assert req_missing == ["01-backprep-s21-ftPT30", "02-radius-r12-s21-final"]
+
+    def test_req_missing_out_only_lists_missing_ones_not_satisfied_ones(self):
+        # One required pattern matches a real file, a second doesn't -- only
+        # the second should show up as missing.
+        f = _file("01-backprep-s21-ftPT30-01.nc")
+        cfg = _cfg("01-out.nc", "02-out.nc", base_entries=[
+            {"name": "01-backprep-s21-ftPT30", "required": "True", "condition": "None"},
+            {"name": "02-radius-r12-s21-final", "required": "True", "condition": "None"},
+        ])
+        req_missing = []
+        plan(cfg, {}, [f], "", [], [], req_missing_out=req_missing)
+        assert req_missing == ["02-radius-r12-s21-final"]
+
+    def test_non_required_missing_pattern_not_reported(self):
+        cfg = _cfg("01-out.nc", base_entries=[
+            {"name": "01-backprep-s21-ftPT30", "required": "False", "condition": "None"}
+        ])
+        req_missing = []
+        plan(cfg, {}, [], "", [], [], req_missing_out=req_missing)
+        assert req_missing == []
+
+    def test_req_missing_out_none_by_default_does_not_raise(self):
+        # Default (no req_missing_out passed) must keep behaving exactly like
+        # every existing caller (tests, cli, etc.) already relies on: no
+        # exception, no extra return value -- just the existing logged warning.
+        cfg = _cfg("01-out.nc", base_entries=[
+            {"name": "01-backprep-s21-ftPT30", "required": "True", "condition": "None"}
+        ])
+        resolved, by_step = plan(cfg, {}, [], "", [], [])
+        assert by_step == {}
+
+    def test_format_missing_required_patterns_lists_every_pattern(self):
+        msg = format_missing_required_patterns(["01-backprep-s21-ftPT30", "02-radius-r12-s21-final"])
+        assert "01-backprep-s21-ftPT30" in msg
+        assert "02-radius-r12-s21-final" in msg
+
+
+class TestPlanRequiredGroup:
+    def test_group_satisfied_when_one_member_matches(self):
+        # Neither member is individually matched by every file, but as long as
+        # ANY active member of the group matches, the group isn't missing.
+        f = _file("06-frets-r12-s21-01.nc")
+        cfg = _cfg("03-out.nc", "06-out.nc", base_entries=[
+            {"name": "03-frets-r12-s21", "required": "True", "condition": "None", "required_group": "frets-slot"},
+            {"name": "06-frets-r12-s21", "required": "True", "condition": "None", "required_group": "frets-slot"},
+        ])
+        req_missing = []
+        plan(cfg, {}, [f], "", [], [], req_missing_out=req_missing)
+        assert req_missing == []
+
+    def test_group_missing_when_no_member_matches(self):
+        cfg = _cfg("03-out.nc", "06-out.nc", base_entries=[
+            {"name": "03-frets-r12-s21", "required": "True", "condition": "None", "required_group": "frets-slot"},
+            {"name": "06-frets-r12-s21", "required": "True", "condition": "None", "required_group": "frets-slot"},
+        ])
+        req_missing = []
+        plan(cfg, {}, [], "", [], [], req_missing_out=req_missing)
+        assert len(req_missing) == 1
+        assert "03-frets-r12-s21" in req_missing[0]
+        assert "06-frets-r12-s21" in req_missing[0]
+
+    def test_group_respects_condition_only_active_members_count(self):
+        # Mirrors the real Fingerboards-in config: 03 is active when
+        # FretStepAlone is falsy, 04 (aliased to 03) when truthy, and 06 is
+        # always active. Only whichever of 03/04 is "in play" this run should
+        # be considered part of the group -- not the inactive one.
+        f = _file("04-frets-r12-s21-01.nc")
+        cfg = _cfg("03-out.nc", "04-out.nc", "06-out.nc", base_entries=[
+            {"name": "03-frets-r12-s21", "required": "True", "condition": "!FretStepAlone", "required_group": "frets-slot"},
+            {"name": "04-frets-r12-s21", "required": "True", "condition": "FretStepAlone", "alias_of": "03-frets-r12-s21", "required_group": "frets-slot"},
+            {"name": "06-frets-r12-s21", "required": "True", "condition": "None", "required_group": "frets-slot"},
+        ])
+        req_missing = []
+        plan(cfg, {"FretStepAlone": "Yes"}, [f], "", [], [], req_missing_out=req_missing)
+        assert req_missing == []
+
+    def test_group_missing_reports_only_active_members(self):
+        cfg = _cfg("03-out.nc", "04-out.nc", "06-out.nc", base_entries=[
+            {"name": "03-frets-r12-s21", "required": "True", "condition": "!FretStepAlone", "required_group": "frets-slot"},
+            {"name": "04-frets-r12-s21", "required": "True", "condition": "FretStepAlone", "alias_of": "03-frets-r12-s21", "required_group": "frets-slot"},
+            {"name": "06-frets-r12-s21", "required": "True", "condition": "None", "required_group": "frets-slot"},
+        ])
+        req_missing = []
+        plan(cfg, {"FretStepAlone": "Yes"}, [], "", [], [], req_missing_out=req_missing)
+        assert len(req_missing) == 1
+        assert "04-frets-r12-s21" in req_missing[0]
+        assert "06-frets-r12-s21" in req_missing[0]
+        assert "03-frets-r12-s21" not in req_missing[0]
+
+    def test_ungrouped_entries_unaffected_by_grouped_entries(self):
+        # Legacy (no required_group key) entries in the same config must keep
+        # being reported individually, exactly as before.
+        cfg = _cfg("01-out.nc", "03-out.nc", "06-out.nc", base_entries=[
+            {"name": "01-backprep-s21-ftPT30", "required": "True", "condition": "None"},
+            {"name": "03-frets-r12-s21", "required": "True", "condition": "None", "required_group": "frets-slot"},
+            {"name": "06-frets-r12-s21", "required": "True", "condition": "None", "required_group": "frets-slot"},
+        ])
+        req_missing = []
+        plan(cfg, {}, [], "", [], [], req_missing_out=req_missing)
+        assert len(req_missing) == 2
+        assert "01-backprep-s21-ftPT30" in req_missing
+        assert any("frets-slot" in m for m in req_missing)
+
+    def test_no_required_group_key_behaves_exactly_as_legacy(self):
+        # No entry in this config uses required_group at all -- must produce
+        # the identical flat per-pattern report as before the feature existed.
+        cfg = _cfg("01-out.nc", "02-out.nc", base_entries=[
+            {"name": "01-backprep-s21-ftPT30", "required": "True", "condition": "None"},
+            {"name": "02-radius-r12-s21-final", "required": "True", "condition": "None"},
+        ])
+        req_missing = []
+        plan(cfg, {}, [], "", [], [], req_missing_out=req_missing)
+        assert req_missing == ["01-backprep-s21-ftPT30", "02-radius-r12-s21-final"]

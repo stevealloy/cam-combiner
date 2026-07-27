@@ -242,7 +242,8 @@ def plan(cfg: Dict[str, Any],
         base_dir: str,
         feature_blocks: list[FeatureBlock],
         features_enabled: list[CAMFeature],
-        verbose: bool=False):
+        verbose: bool=False,
+        req_missing_out: list=None):
     if verbose:
         debug_print("==========================================PLANNER==============================")
 
@@ -273,6 +274,12 @@ def plan(cfg: Dict[str, Any],
     firstbool: Dict[CAMFile, List[bool]] = {}
     endbool: Dict[CAMFile, List[bool]] = {}
     req_missing = []
+    # required_group: entries sharing a group name are OR'd for requiredness --
+    # the group is satisfied if ANY of its active (condition-true) members
+    # matched at least one file. Finalized after the base_entries loop below,
+    # since a later entry in the same group can satisfy it after an earlier
+    # one in the group already came up empty.
+    req_group_state: Dict[str, Dict[str, Any]] = {}
 
     params = {}
     for p in parameters:
@@ -285,6 +292,7 @@ def plan(cfg: Dict[str, Any],
     for entry in base_entries:
         patt = entry.get("name") if isinstance(entry, dict) else str(entry)
         required = str(entry.get("required", "False")).lower() in ("true","yes","1") if isinstance(entry, dict) else False
+        req_group = (entry.get("required_group") if isinstance(entry, dict) else None) or None
         cond = (entry.get("condition") if isinstance(entry, dict) else None) or ""
         ok = eval_condition(cond, params)
         if verbose:
@@ -356,8 +364,14 @@ def plan(cfg: Dict[str, Any],
 
         if verbose:
             debug_print(f"[base] {patt}: matches={len(matches)}")
-        if required and not matches:
-            req_missing.append(patt)
+        if required:
+            if req_group:
+                gs = req_group_state.setdefault(req_group, {"matched": False, "patterns": []})
+                gs["patterns"].append(patt)
+                if matches:
+                    gs["matched"] = True
+            elif not matches:
+                req_missing.append(patt)
         for m in matches:
             step = alias_step or m.get_step()
             if verbose:
@@ -365,6 +379,10 @@ def plan(cfg: Dict[str, Any],
             selected_by_step.setdefault(step, []).append(m)
             m.set_matching_search_string(f"{patt} (aliased from {alias_of})" if alias_step else patt)
             #print("match: " + patt + str(m.name))
+
+    for group_name, gs in req_group_state.items():
+        if not gs["matched"]:
+            req_missing.append(f"one of: {', '.join(gs['patterns'])} (required_group '{group_name}')")
 
     # For files that never got a full match against any in-play base pattern,
     # record which token(s) diverge from the closest attempt (fewest differing
@@ -412,6 +430,13 @@ def plan(cfg: Dict[str, Any],
 
     if req_missing:
         debug_print("[warn] required base patterns missing:" + ", ".join(req_missing))
+    # Optional out-param rather than a new return value, so every existing
+    # caller unpacking plan()'s 2-tuple (tests, cli, the GUI's other call
+    # sites) keeps working unchanged -- only a caller that explicitly wants
+    # to enforce this (write_output_files(), via run_plan()'s state) passes
+    # a list here to read it back.
+    if req_missing_out is not None:
+        req_missing_out.extend(req_missing)
 
     # Handedness filter: applied universally after all file selection.
     # Lefty=True  → keep files with -lefty or neither; drop -righty
@@ -534,3 +559,11 @@ def plan(cfg: Dict[str, Any],
     debug_print("=========================================================")
 
     return resolved_outputs, sorted_selected_by_step
+
+
+def format_missing_required_patterns(missing: List[str]) -> str:
+    lines = [f"  {p}" for p in missing]
+    return (
+        "required base file pattern(s) matched no files -- output not generated:\n"
+        + "\n".join(lines)
+    )

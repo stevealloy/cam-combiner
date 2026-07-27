@@ -291,9 +291,10 @@ this base entry when both `FretStepAlone` and `UseAggregateFrets` are false.
 ```jsonc
 {
   "name": "05-profile-<Scale>-<NutWidth>-<NutSlot>-<HeelShape>-<NumFrets>",
-  "required": "True",   // if true and nothing matches, a warning is logged (does not abort the run)
-  "condition": "None",  // see §6.3
-  "alias_of": null       // optional -- see below
+  "required": "True",         // if true and nothing matches, Generate Output aborts with an error (see below)
+  "condition": "None",        // see §6.3
+  "alias_of": null,           // optional -- see below
+  "required_group": null      // optional -- see below
 }
 ```
 
@@ -317,6 +318,25 @@ implies). A genuine direct match for the entry's own `name` always takes
 priority over the alias — `alias_of` only ever fires when the direct match
 count is zero. Resolution is a single lookup against real scanned files, not
 against another config entry, so alias chains/recursion aren't possible.
+
+**`required_group`** (optional): a group name string. Entries sharing the same
+`required_group` are OR'd together for requiredness instead of each being
+independently required — the group is satisfied if *any* of its currently
+active (`condition`-true) members matched at least one file; it's only
+reported as missing if *none* of them did. Use this when several alternative
+base entries can each stand in for a required operation and exactly which one
+applies depends on other parameters. For example, Fingerboards-in's fret
+slotting can happen at step 03 or 04 (depending on `FretStepAlone`) or,
+separately, be satisfied by an aggregate step-06 file — expressed as:
+
+```jsonc
+{ "name": "03-frets-...", "required": "True", "condition": "!FretStepAlone", "required_group": "frets-slot" },
+{ "name": "04-frets-...", "required": "True", "condition": "FretStepAlone",  "required_group": "frets-slot", "alias_of": "03-frets-..." },
+{ "name": "06-frets-...", "required": "True", "condition": "None",          "required_group": "frets-slot" }
+```
+
+Entries with no `required_group` key (every config predating this feature)
+behave exactly as before: each is independently required, with no grouping.
 
 ### 6.5 `OUTPUT-FILE-NAMES`
 
@@ -368,8 +388,14 @@ evaluates true:
    no configured wildcard are skipped from these combinations).
 3. Match all of these concrete strings as file-name prefixes (§6.4) and take
    the **union** of every file matched by any of them, de-duplicated.
-4. If `required` is true and nothing matched at all, log a warning (with the
-   pattern) — this does not stop the run.
+4. If `required` is true and nothing matched at all, the pattern is recorded
+   as missing. Ungrouped entries are each checked individually; entries
+   sharing a `required_group` (§6.4) are checked together once every entry in
+   `INPUT-FILE-NAME-BASES` has been evaluated, and only counted as missing if
+   *no* active member of the group matched anything. Any patterns/groups left
+   missing after the full pass abort Generate Output with an error before any
+   file is written — live preview (the Outputs table) is unaffected and keeps
+   updating as you change parameters.
 
 Matched files are appended, per entry, in the order the entries appear in
 `INPUT-FILE-NAME-BASES`.
