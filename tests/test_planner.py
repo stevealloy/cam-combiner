@@ -75,6 +75,39 @@ class TestFromLines:
         f = _file("01-prep.nc", ["G0 X0Y0\n", "G0 X1 Y2\n"])
         assert "HOME\n" in f._lines
 
+    def test_feature_file_front_marker_wins_over_lookalike_leading_prefix(self):
+        # "P90" (a pickup style) has the exact shape of a step prefix
+        # (letter + 2 digits), and on a feature file the -front/-back marker --
+        # not the leading token -- is what actually determines the step.
+        f = _file("P90-PUP-Bridge-front-01.nc", is_root=False)
+        assert f.get_step() == "FRONT"
+
+    def test_feature_file_keeps_lookalike_prefix_in_feature_name(self):
+        # The "P90-" is part of the feature's identity (which pickup style), not
+        # a step marker to discard -- losing it would collapse "P90 bridge pickup"
+        # and any other same-named pickup-position feature into one indistinguishable tag.
+        f = _file("P90-PUP-Bridge-front-01.nc", is_root=False)
+        assert f.get_feature_name() == "P90-PUP-Bridge"
+
+    def test_feature_file_without_lookalike_prefix_unaffected(self):
+        f = _file("Hum-PUP-Bridge-front-01.nc", is_root=False)
+        assert f.get_step() == "FRONT"
+        assert f.get_feature_name() == "Hum-PUP-Bridge"
+
+    def test_feature_file_genuine_numeric_prefix_still_used_as_step(self):
+        # No -front/-back marker present -- the leading numeric prefix is the
+        # only step signal, and must still be honored on feature files (e.g.
+        # Fingerboards-in/Options/05-nutslot-*.nc).
+        f = _file("05-nutslot-AnyScale-Fender-PT092-01.nc", is_root=False)
+        assert f.get_step() == "05"
+        assert f.get_feature_name() == "nutslot-AnyScale-Fender-PT092"
+
+    def test_root_file_leading_prefix_still_wins_over_front_marker(self):
+        # Root/base files keep the original prefix-first precedence regardless
+        # of a -front/-back marker elsewhere in the name.
+        f = _file("B00-radius-front-01.nc", is_root=True)
+        assert f.get_step() == "B00"
+
 
 # ---------------------------------------------------------------------------
 # plan() — file selection

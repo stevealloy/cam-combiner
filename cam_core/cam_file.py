@@ -59,11 +59,49 @@ class CAMFile:
         self._step = "00"
 
         self._run_suffix = None
+
+        # determine the appropriate step for this file.
+        # Root/base files: the leading step prefix always wins -- any letter is
+        # accepted here, matching jsonc_loader.normalize_legacy()'s OUTPUT-FILE-NAMES
+        # step regex, both sides must agree on what counts as a step prefix, or a
+        # file can match an output entry's pattern but still get bucketed under the
+        # wrong step (e.g. ThroughNeck-in's W00/W01/W02 series).
+        # Feature (subfolder) files: -front/-back wins INSTEAD, checked before the
+        # leading-prefix regex -- a feature file's leading token is sometimes a
+        # descriptive prefix that only coincidentally looks like a step (e.g. the
+        # "P90" pickup style in PUPS/P90-PUP-Bridge-front-01.nc, indistinguishable
+        # in shape from a real step like "B00"). Every such file across the actual
+        # build tree already carries an explicit -front/-back marker, so checking
+        # that first resolves the ambiguity without touching root-file step parsing
+        # (which has no such marker to prefer and must keep the prefix-first order).
+        prefix_match = re.search(r"^([A-Za-z]?\d{2})-", self.name)
+        front_match = re.search(r"(-front)[-\.]", self.name)
+        back_match = re.search(r"(-back)[-\.]", self.name)
+        if is_root and prefix_match is not None:
+            self._step = prefix_match[1]
+        elif not is_root and front_match is not None:
+            self._step = "FRONT"
+        elif not is_root and back_match is not None:
+            self._step = "BACK"
+        elif prefix_match is not None:
+            self._step = prefix_match[1]
+        elif front_match is not None:
+            self._step = "FRONT"
+        elif back_match is not None:
+            self._step = "BACK"
+        else:
+            self._step = "00"
+        if self._debug:
+            debug_print("     step: " + str(self._step))
+
         # _family_tag is always computed, even for root/base files -- unlike
         # get_feature_name() (used by the CAMFeature toggle system, which deliberately
         # treats root files as having no feature), this is a general-purpose "what
         # operation is this, independent of which file it is" tag used by the
         # consistency checks to group root-level files (profile, frets, radius, ...) too.
+        # Computed after self._step (above) so it can reuse that same root-vs-feature
+        # prefix/front-back precedence when deciding whether the leading token is a
+        # step to discard or part of the feature's identity to keep (e.g. "P90-").
         self._family_tag = self._feature_tag_from_rel()
         self._feature_name = "" if is_root else self._family_tag
 
@@ -79,27 +117,6 @@ class CAMFile:
 
         if self._debug:
             debug_print("New CAMFile: n:" + self.name + "D:" + directory + "====" + self._dir + " is base?")
-
-        # determine the appropriate step for this file
-        # any letter is accepted here, matching jsonc_loader.normalize_legacy()'s
-        # OUTPUT-FILE-NAMES step regex -- both sides must agree on what counts as a
-        # step prefix, or a file can match an output entry's pattern but still get
-        # bucketed under the wrong step (e.g. ThroughNeck-in's W00/W01/W02 series).
-        match = re.search(r"^([A-Za-z]?\d{2})-", self.name)
-        if match is not None:
-            self._step = match[1]
-        else:
-            match = re.search(r"(-front)[-\.]", self.name)
-            if match is not None:
-                self._step = "FRONT"
-            else:
-                match = re.search(r"(-back)[-\.]", self.name)
-                if match is not None:
-                    self._step = "BACK"
-                else:
-                    self._step = "00"
-        if self._debug:
-            debug_print("     step: " + str(self._step))
 
         ##########################################################
         # read the contents of the file into an array
@@ -202,8 +219,13 @@ class CAMFile:
     def _feature_tag_from_rel(self) -> str:
         part = self.name.split("/", 1)[-1] if "/" in self.name else self.filename
         stem = os.path.splitext(os.path.basename(part))[0]
-        # strip known tags (see get_step() above for why any letter is accepted here)
-        stem = re.sub(r"^([A-Za-z]?\d{2})-", "", stem)
+        # strip known tags (see get_step() above for why any letter is accepted here).
+        # Only strip the leading token if it was actually treated as this file's step
+        # (self._step, set just above) -- on a feature file where -front/-back took
+        # precedence instead (e.g. "P90-PUP-Bridge-front-01.nc"), the leading token is
+        # part of the feature's own identity, not a step to discard.
+        if self._is_root or self._step not in ("FRONT", "BACK"):
+            stem = re.sub(r"^([A-Za-z]?\d{2})-", "", stem)
         stem = re.sub(r"-NODUP", "", stem)
         stem = re.sub(r"-NOMIRROR", "", stem)
         stem = re.sub(r"-front-", "-", stem)

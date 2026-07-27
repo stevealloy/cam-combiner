@@ -178,9 +178,9 @@ case-insensitive matches on the file's base name:
 
 | Pattern | Meaning |
 |---|---|
-| `^(\d\d)-...` or `^([A-Ga-g]\d\d)-...` | **Step prefix.** Determines which output file this source belongs to (matched against each output name's own leading step prefix). |
-| `...-front-...` / `...-front` (no step prefix) | Step is treated as the special token `FRONT`, resolved via the config's `FRONT-STEP`. |
-| `...-back-...` / `...-back` (no step prefix) | Step is treated as `BACK`, resolved via `BACK-STEP`. |
+| `^(\d\d)-...` or `^([A-Za-z]\d\d)-...` | **Step prefix.** Determines which output file this source belongs to (matched against each output name's own leading step prefix). |
+| `...-front-...` / `...-front` | Step is treated as the special token `FRONT`, resolved via the config's `FRONT-STEP`. |
+| `...-back-...` / `...-back` | Step is treated as `BACK`, resolved via `BACK-STEP`. |
 | `...-first...` or `...-start...` | File is ordered **before** the normal files in its step (see [§7.5](#75-within-step-ordering)). |
 | `...-end...` | File is ordered **after** the normal files in its step. |
 | `...-lefty...` | File is only included when the `Lefty` parameter is on; dropped when off. |
@@ -188,10 +188,26 @@ case-insensitive matches on the file's base name:
 | `...-NODUP...` | Output only once (unit 1), not duplicated/offset per unit, not mirrored. |
 | `...-NOMIRROR...` | Duplicated per unit as normal, but never mirrored even when `Lefty` is on. |
 
+**Step-prefix vs. `-front`/`-back` precedence differs by file kind.** Base
+files (root of `*-in`/shared dir) always take the leading step prefix over
+`-front`/`-back` when both are present. Feature files (subfolder) do the
+opposite — `-front`/`-back` wins over a leading step-prefix-shaped token —
+because a feature file's leading token is sometimes a descriptive name that
+only coincidentally has the letter+2-digit step shape (e.g. the "P90" pickup
+style in `PUPS/P90-PUP-Bridge-front-01.nc`, indistinguishable in shape from a
+real step like `B00`). Every such case in the actual build tree carries an
+explicit `-front`/`-back` marker, so that's checked first for feature files.
+Base files have no such marker to prefer and keep the original prefix-first
+order (e.g. `ThroughNeck-in`'s `W00`/`W01`/`W02` series, which have no
+`-front`/`-back` to conflict with anyway).
+
 A feature file's **feature name** is derived from its own name by stripping
-the step prefix, `-front`/`-back`, `-start`/`-end`, `-NODUP`/`-NOMIRROR`, and
-any trailing `-NN` run number — files that reduce to the same feature name
-(within the same subfolder) become one checkbox in the GUI.
+`-start`/`-end`, `-NODUP`/`-NOMIRROR`, any trailing `-NN` run number, and the
+step prefix/`-front`/`-back` token that was actually *used as its step*
+(per the precedence above) — files that reduce to the same feature name
+(within the same subfolder) become one checkbox in the GUI. A leading token
+that lost out to `-front`/`-back` (like `P90-` above) is kept as part of the
+feature name instead of being discarded, since it's identity, not a step.
 
 ---
 
