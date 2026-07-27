@@ -3,6 +3,7 @@ import errno
 from cam_core.version import GUI_BANNER, APP_BANNER, VERSION
 from cam_core.jsonc_loader import load_config_file, normalize_legacy
 from cam_core.planner import plan, scan_files, format_missing_required_patterns
+from cam_core.file_order import apply_order_override
 from cam_core.writer import write_output_file
 from cam_core.tool_conflicts import find_active_tool_conflicts, format_tool_conflicts
 from cam_core.handedness import find_handedness_orphans, format_handedness_orphans
@@ -40,6 +41,7 @@ state = {
     "_unit_tmp_dir": None,      # local scratch dir holding 1/, 1toN/, ... while being built
     "unreachable_ids": set(),  # id() of root CAMFiles unreachable by ANY parameter combo
     "_unreachable_cache_key": None,  # (id(CAMFiles), id(cfg)) the above was computed for
+    "file_order": {},           # step -> [filename, ...] manual reorder override (Outputs table Up/Down)
 }
 
 param_based_color = (255, 0, 0, 255)  # red
@@ -460,6 +462,11 @@ def run_plan(sender=None, app_data=None, user_data=None):
     # actually enforces this, via the cached list here.
     state["req_missing"] = req_missing
 
+    # Manual per-step reorder (Outputs table Up/Down buttons) applied here so
+    # both the Outputs table display AND the actual combined-file write
+    # (write_output_files() reads state["by_step"]) see the same order.
+    by_step = apply_order_override(by_step, state.get("file_order", {}))
+
     # Reachability (is this root file selectable by ANY parameter combination at
     # all, not just the current one?) only depends on the scanned files + config,
     # not on the current parameter selection -- cache it per (CAMFiles, cfg) so
@@ -480,18 +487,41 @@ def run_plan(sender=None, app_data=None, user_data=None):
         step = str(out.get("step", ""))
         name = out.get("name", "")
         step_files = by_step.get(step, [])
-        files_str = "\n".join(f.name for f in step_files)
-        files_height = _multiline_height(len(step_files))
+        files_str = "\n".join(f"T{str(f.get_toolnum()).zfill(2)} {f.name}" for f in step_files)
         with dpg.table_row(parent="Outputs_table"):
             dpg.add_text(f"{step:02}")
             dpg.add_input_text(default_value=name, readonly=True, width=-1)
-            dpg.add_input_text(default_value=files_str, readonly=True, multiline=True,
-                               width=-1, height=files_height)
+            with dpg.group():
+                for i, f in enumerate(step_files):
+                    with dpg.group(horizontal=True):
+                        dpg.add_button(label="^", width=18, enabled=i > 0,
+                                       callback=_move_output_file, user_data=(step, i, -1))
+                        dpg.add_button(label="v", width=18, enabled=i < len(step_files) - 1,
+                                       callback=_move_output_file, user_data=(step, i, 1))
+                        _add_selectable_text(f"T{str(f.get_toolnum()).zfill(2)} {f.name}")
         parts += f"{step:02}   {name:35s}{files_str}\n"
     debug_print(parts)
 
     state["resolved"] = resolved
     state["by_step"] = by_step
+
+
+def _move_output_file(sender, app_data, user_data):
+    """Swap a file with its neighbor within one step's Outputs-table order (Up/Down
+    buttons), persisting the result as this step's manual override going forward.
+    Seeded from the step's CURRENT (already-displayed) order on first use, so it
+    captures whatever the default rule-based ordering produced rather than an
+    empty list -- only the two swapped entries actually move."""
+    step, index, direction = user_data
+    order = state.setdefault("file_order", {})
+    current = order.get(step)
+    if current is None:
+        current = [f.name for f in state.get("by_step", {}).get(step, [])]
+    new_index = index + direction
+    if 0 <= new_index < len(current):
+        current[index], current[new_index] = current[new_index], current[index]
+    order[step] = current
+    run_plan()
 
 
 def _cleanup_unit_tmp_dir():
@@ -1095,6 +1125,9 @@ def _apply_session(path: str) -> bool:
 
     # Override params with saved values
     state["params"].update(data.get("params", {}))
+
+    # Restore manual Outputs-table file-order overrides (Up/Down buttons)
+    state["file_order"] = data.get("file_order", {})
 
     # Scan files with restored directories
     CAMFiles, FeatureBlocks, CAMFeatures, CAMTools = scan_files(
