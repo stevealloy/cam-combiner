@@ -228,7 +228,7 @@ A full worked example lives at `Testing/Fingerboards-in/fixture_config.txt`.
 
   "FRONT-STEP": "02-",   // step prefix substituted for the "FRONT" pseudo-step
   "BACK-STEP": "08-",    // step prefix substituted for the "BACK" pseudo-step
-  "NUM-STEPS": 10,        // number of entries from OUTPUT-FILE-NAMES to summarize in summary.txt
+  "NUM-STEPS": 10,        // legacy; unused by output generation today (see §12.5), kept for old configs
 
   "OUTPUT-FILE-NAMES": [ /* see §6.5 */ ]
 }
@@ -676,12 +676,17 @@ it's automatically picked up by `conftest.py` — no test code changes needed.
   `fixture_config.txt` (both `Testing/` fixtures and the shared build tree)
   as of 2026-07-20 (§6.1).
 - `summary.txt` generation (`write_output_files()` in `cam_combiner_gui.py`)
-  walks `range(0, NUM-STEPS)` against the legacy `OUTPUT-FILE-NAMES` list
-  with zero-padded numeric step strings, independently of the
-  `outputs`/`resolved` list used to actually write the combined output
-  files. If a model uses non-numeric step prefixes (e.g. `B00`), double
-  check `summary.txt` still reflects those steps correctly — the two
-  mechanisms are not guaranteed to stay in lockstep for exotic step naming.
+  used to walk `range(0, NUM-STEPS)` and derive each entry's step by
+  zero-padding the loop *index* (`str(stepnum).zfill(2)`), independently of
+  the `outputs`/`resolved` list actually used to write the combined output
+  files. That miscounted as soon as any earlier `OUTPUT-FILE-NAMES` entry had
+  a non-numeric-index step (e.g. `B00`/`B01`/...), silently shifting every
+  later entry's reported file list off by however many such entries preceded
+  it. Fixed (2026-07-27) to iterate the same `outputs` list (with its real,
+  regex-derived `step`) that the actual write loop uses, so `summary.txt` now
+  always matches what was actually generated. `NUM-STEPS` is otherwise
+  unused by output generation — every `OUTPUT-FILE-NAMES` entry is always
+  processed regardless of its value.
 - `cam_combiner_cli.py` does not write output files (§10) — it's a
   plan-only smoke test today, not a full headless equivalent of "Generate Output".
 

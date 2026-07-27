@@ -665,9 +665,6 @@ def write_output_files():
     lefty = state["params"]["Lefty"]
     base_input_dir = state["base"]
     base_output_dir = state["output_base"]
-    num_steps = state["cfg"]["NUM-STEPS"]
-    output_file_names = state["cfg"]["OUTPUT-FILE-NAMES"]
-
     # Fatal error: a required base pattern (fixture_config.txt's "required": true)
     # matched no file at all for the current parameter selection. Used to be a
     # logged warning only, letting a run silently ship incomplete/wrong output;
@@ -732,9 +729,9 @@ def write_output_files():
     output_file.write("**************************************************************\n")
     output_file.write("**********OutputFileNames*************************************\n")
 
-    for stepnum in range(0, num_steps):
-        output_file.write(output_file_names[stepnum] + "\n")
-        stepstr = str(stepnum).zfill(2)
+    for out in outputs:
+        output_file.write(out["name"] + "\n")
+        stepstr = out["step"]
         if stepstr in by_step:
             for f in by_step[stepstr]:
                 output_file.write("\t" + f.name + "\tT" + str(f.get_toolnum()) + "\n")
