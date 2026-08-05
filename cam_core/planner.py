@@ -155,21 +155,32 @@ def _scan_features():
     return
 
 
-def scan_files(base_dir: str, include_ext: Tuple[str,...]=(".nc",), shared_dir: str=None) ->Tuple[List[CAMFile], List[FeatureBlock], List[CAMFeature], List[Tool]]:
+def _normalize_passthrough_dirs(dirs) -> set:
+    """Normalize ROOT-PASSTHROUGH-DIRS entries (relative paths, '/' or '\\'
+    separators, any case) into a set of lowercase '/'-separated relative
+    paths for matching against the relative path computed while walking."""
+    return {d.strip("/\\").replace("\\", "/").lower() for d in (dirs or []) if d}
+
+
+def scan_files(base_dir: str, include_ext: Tuple[str,...]=(".nc",), shared_dir: str=None,
+               root_passthrough_dirs: List[str]=None) ->Tuple[List[CAMFile], List[FeatureBlock], List[CAMFeature], List[Tool]]:
     scan_files.cfiles: [CAMFile] = []
     scan_files.cfeatures: [CAMFeature] = []
     scan_files.fblocks: [FeatureBlock] = []
     scan_files.tools: [Tool] = []
 
-    scan_files.current_featureblock = FeatureBlock("Base", "Base")
-    scan_files.fblocks.append(scan_files.current_featureblock)
+    base_block = FeatureBlock("Base", "Base")
+    scan_files.current_featureblock = base_block
+    scan_files.fblocks.append(base_block)
 
-    _scan_files_int(base_dir, include_ext)
+    passthrough = _normalize_passthrough_dirs(root_passthrough_dirs)
+
+    _scan_files_int(base_dir, include_ext, passthrough_dirs=passthrough, root_block=base_block)
 
     if shared_dir:
-        base_block = next(fb for fb in scan_files.fblocks if fb.name == "Base")
         scan_files.current_featureblock = base_block
-        _scan_files_int(shared_dir, include_ext, block_prefix="Shared")
+        _scan_files_int(shared_dir, include_ext, block_prefix="Shared",
+                         passthrough_dirs=passthrough, root_block=base_block)
 
     _scan_features()
 
@@ -187,7 +198,9 @@ def scan_files(base_dir: str, include_ext: Tuple[str,...]=(".nc",), shared_dir: 
     return scan_files.cfiles, scan_files.fblocks, scan_files.cfeatures, scan_files.tools
 
 
-def _scan_files_int(base_dir: str, include_ext: Tuple[str,...]=(".nc",), block_prefix: str=""):
+def _scan_files_int(base_dir: str, include_ext: Tuple[str,...]=(".nc",), block_prefix: str="",
+                     passthrough_dirs: set = frozenset(), rel_path: str = "",
+                     force_root: bool = False, root_block: FeatureBlock = None):
     verbose = False
     skip_files = {"fixture_config.txt", "desktop.ini", "#*", ".*", ".DS_Store"}
 
@@ -225,10 +238,26 @@ def _scan_files_int(base_dir: str, include_ext: Tuple[str,...]=(".nc",), block_p
         if entry.is_dir():
             if verbose:
                 debug_print("DIR:" + entry.name)
-            block_name = (block_prefix + "/" + entry.name) if block_prefix else entry.name
-            scan_files.current_featureblock = FeatureBlock(block_name, entry.name)
-            scan_files.fblocks.append(scan_files.current_featureblock)
-            _scan_files_int(fname, include_ext, block_name)
+            child_rel = f"{rel_path}/{entry.name}" if rel_path else entry.name
+            child_force_root = force_root or child_rel.lower() in passthrough_dirs
+            if child_force_root:
+                # ROOT-PASSTHROUGH-DIRS: this subtree's files are still root/base
+                # files (see fixture_config.txt), just physically organized under
+                # a subdirectory for scale/caching reasons -- keep them anchored to
+                # the Base block instead of starting a new FeatureBlock. Re-set
+                # current_featureblock explicitly (rather than trusting whatever a
+                # previously-processed sibling directory left it as) so a normal
+                # feature dir processed just before this one can't misattribute
+                # these files to the wrong block.
+                scan_files.current_featureblock = root_block
+                _scan_files_int(fname, include_ext, block_prefix, passthrough_dirs,
+                                 child_rel, True, root_block)
+            else:
+                block_name = (block_prefix + "/" + entry.name) if block_prefix else entry.name
+                scan_files.current_featureblock = FeatureBlock(block_name, entry.name)
+                scan_files.fblocks.append(scan_files.current_featureblock)
+                _scan_files_int(fname, include_ext, block_name, passthrough_dirs,
+                                 child_rel, False, root_block)
 
     return
 

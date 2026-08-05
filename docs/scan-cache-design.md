@@ -331,9 +331,18 @@ the design above:
 
 ## 11. Prerequisite: `ROOT-PASSTHROUGH-DIRS` (root/feature classification vs. directory depth)
 
-This is a matching-semantics gap this design exposed, not something the
-caching design itself introduces — but it blocks the caching design from
-being useful on `ScriptOutput/`-style trees until it's fixed, so it's
+**Status: implemented** (`cam_core/planner.py`, `cam_core/jsonc_loader.py`,
+`cam_combiner_cli.py`, `cam_combiner_gui.py`; tests in
+`tests/test_root_passthrough.py`; documented in `docs/GUIDE.md` §6.6).
+Landed ahead of the Tier A/B caching work below on the reasoning that it's
+small, self-contained, and unblocks pointing CC2 at a real
+`ScriptOutput/`-style tree sooner — which in turn gives real usage data for
+§12's open questions (chunk sizes, whether Tier B is worth building for a
+given corpus) before committing to the caching design itself.
+
+This was a matching-semantics gap this design exposed, not something the
+caching design itself introduces — but it blocked the caching design from
+being useful on `ScriptOutput/`-style trees until fixed, so it's
 documented here as a prerequisite.
 
 **The gap.** `Fingerboards-in/fixture_config.txt:164` declares
@@ -424,20 +433,18 @@ name-based matching instead.
 
 ## 13. Suggested rollout order
 
-1. `scan_cache.py` + digest accumulation in `_scan_files_int` + skip-reparse
+1. ~~Implement `ROOT-PASSTHROUGH-DIRS` (§11)~~ — **done**, landed first
+   since it's small/self-contained and unblocks pointing CC2 at a real
+   `ScriptOutput/`-style tree, which feeds real data into step 4 below.
+2. `scan_cache.py` + digest accumulation in `_scan_files_int` + skip-reparse
    on hit. No GUI changes yet — this alone gets the Tier A win, and applies
    uniformly to every corpus (neck-family included) regardless of Tier B.
-   Works independently of §11 — chunking doesn't need passthrough dirs to
-   function, only base-file *matching* does.
-2. Wire the stale-chunk list into the GUI as a simple status line ("3
+3. Wire the stale-chunk list into the GUI as a simple status line ("3
    chunks changed since last scan") before building the full prompt UI —
    validates the digesting logic against real trees first.
-3. Clean up the `Fingerboards-in/ScriptOutput/Profiles/` loose-vs-`s24/`
+4. Clean up the `Fingerboards-in/ScriptOutput/Profiles/` loose-vs-`s24/`
    duplicate (§10) — unrelated to this design mechanically, but doing it
    now avoids the digest/materializer ever having to reason about it.
-4. Implement `ROOT-PASSTHROUGH-DIRS` (§11) — needed before `ScriptOutput/`
-   -style trees are actually matched as base files at all; independent of
-   and can land before/after/alongside steps 1-2.
 5. Answer open question #1 **per corpus that actually uses runtime
    mirroring** (`Fingerboards-in`, `s-in`, `tiltback-necks-in`,
    `bass-neck-in` first).

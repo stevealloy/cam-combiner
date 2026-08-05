@@ -44,7 +44,7 @@ def main():
 
     params = {p["name"]: p.get("default") for p in cfg.get("parameters",[]) if isinstance(p, dict) and p.get("name")}
 
-    files, fblocks, features, tools = scan_files(base)
+    files, fblocks, features, tools = scan_files(base, root_passthrough_dirs=cfg.get("root_passthrough_dirs", []))
     if args.verbose:
         debug_dump_params_and_dir(base, params, files)
 

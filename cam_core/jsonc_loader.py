@@ -74,6 +74,9 @@ def normalize_legacy(cfg: Dict[str, Any]) -> Dict[str, Any]:
         c["outputs"] = outs
     if "PARAMETERS" in c and "parameters" not in c:
         c["parameters"] = c["PARAMETERS"]
+    if "ROOT-PASSTHROUGH-DIRS" in c and "root_passthrough_dirs" not in c:
+        c["root_passthrough_dirs"] = c["ROOT-PASSTHROUGH-DIRS"]
+    c.setdefault("root_passthrough_dirs", [])
     c.setdefault("parameters", [])
     c.setdefault("base_selection", {}).setdefault("input_file_base_names", [])
     c.setdefault("outputs", [])

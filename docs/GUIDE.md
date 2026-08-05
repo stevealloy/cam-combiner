@@ -168,6 +168,11 @@ still is.
   `INPUT-FILE-NAME-BASES`.
 - **Feature files** (anything in a subfolder) are grouped automatically —
   see [§7.4](#74-features-subfolder-files).
+- **Exception:** a subfolder listed in `ROOT-PASSTHROUGH-DIRS` (see
+  [§6.6](#66-root-passthrough-dirs)) is treated as base files too, at any
+  nesting depth beneath it — for corpora organized into subdirectories
+  purely for scale/organization (e.g. a `<Scale>/` split) rather than as a
+  real optional feature.
 
 ---
 
@@ -241,6 +246,7 @@ A full worked example lives at `Testing/Fingerboards-in/fixture_config.txt`.
 
   "PARAMETERS": [ /* see §6.2 */ ],
   "INPUT-FILE-NAME-BASES": [ /* see §6.4 */ ],
+  "ROOT-PASSTHROUGH-DIRS": [ /* optional, see §6.6 */ ],
 
   "FRONT-STEP": "02-",   // step prefix substituted for the "FRONT" pseudo-step
   "BACK-STEP": "08-",    // step prefix substituted for the "BACK" pseudo-step
@@ -371,6 +377,38 @@ looser pattern than the `^([A-Ga-g]?\d{2})-` used to parse source-file steps,
 so e.g. `B00-...` and `s21-...` both extract a prefix here) determines which
 step's matched source files get written into it. A name with no recognizable
 prefix gets step `""`.
+
+### 6.6 `ROOT-PASSTHROUGH-DIRS`
+
+Optional. A list of subdirectory paths, relative to the base dir (or shared
+dir), whose contents should still be treated as **base files** — matched
+against `INPUT-FILE-NAME-BASES`, using base-file step-prefix parsing rules
+(§5) — instead of the default "any subfolder is a feature" behavior (§7.4).
+
+```jsonc
+"ROOT-PASSTHROUGH-DIRS": ["ScriptOutput"]
+```
+
+Every file anywhere beneath a listed path, at any nesting depth, is treated
+as a base file — e.g. `ScriptOutput/Profiles/s24/05-profile-...-01.nc`
+counts the same as a file sitting loose in the base dir's own root. This
+exists for corpora organized into subdirectories purely for scale/caching
+reasons (e.g. large scripted-generation output split into `<Scale>/`
+folders so no single directory holds thousands of files) where the
+subdirectory boundary is *not* meant to represent an optional feature.
+
+- Matching is by **path prefix**, not bare directory name — `"ScriptOutput"`
+  matches `ScriptOutput/anything`, not an unrelated folder elsewhere in the
+  tree that happens to share a name. To passthrough only part of a tree,
+  list the more specific path, e.g. `"ScriptOutput/Profiles"` (leaving a
+  sibling `ScriptOutput/Radius` as a normal feature folder).
+- Matching is case-insensitive and accepts either `/` or `\` as the
+  separator in the config value.
+- This is purely additive — a directory not listed under
+  `ROOT-PASSTHROUGH-DIRS` behaves exactly as it always has. Existing
+  configs with no `ROOT-PASSTHROUGH-DIRS` key are unaffected.
+- Files under a passthrough path are excluded from `CAMFeature`/GUI-checkbox
+  grouping entirely, the same as any other base file.
 
 ---
 

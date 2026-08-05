@@ -61,6 +61,11 @@ CAMFeatures: list[CAMFeature] = []      # CAMFeature objects
 FeatureBlocks: list[FeatureBlock] = []     # FeatureBlock objects
 CAMTools: list[Tool] = []
 
+def _passthrough_dirs() -> list:
+    """ROOT-PASSTHROUGH-DIRS from the currently loaded config, if any."""
+    return (state.get("cfg") or {}).get("root_passthrough_dirs", [])
+
+
 def _on_param_change(sender, app_data, user_data):
     """Combo callback: keep state['params'] in sync with GUI."""
     name = user_data
@@ -1079,7 +1084,9 @@ def choose_base(sender, app_data):
         dpg.set_value("shared_val", "")
 
     # Scan & refresh Features
-    CAMFiles, FeatureBlocks, CAMFeatures, CAMTools = scan_files(state["base"], shared_dir=state["shared_dir"])
+    CAMFiles, FeatureBlocks, CAMFeatures, CAMTools = scan_files(
+        state["base"], shared_dir=state["shared_dir"], root_passthrough_dirs=_passthrough_dirs()
+    )
     _log_consistency_warnings(CAMFiles)
 
     run_plan()
@@ -1098,7 +1105,9 @@ def choose_shared(sender, app_data):
     state["shared_dir"] = app_data["file_path_name"]
     dpg.set_value("shared_val", state["shared_dir"])
 
-    CAMFiles, FeatureBlocks, CAMFeatures, CAMTools = scan_files(state["base"], shared_dir=state["shared_dir"])
+    CAMFiles, FeatureBlocks, CAMFeatures, CAMTools = scan_files(
+        state["base"], shared_dir=state["shared_dir"], root_passthrough_dirs=_passthrough_dirs()
+    )
     _log_consistency_warnings(CAMFiles)
     run_plan()
     _refresh_ui(True)
@@ -1136,7 +1145,7 @@ def _apply_session(path: str) -> bool:
 
     # Scan files with restored directories
     CAMFiles, FeatureBlocks, CAMFeatures, CAMTools = scan_files(
-        state["base"], shared_dir=state["shared_dir"]
+        state["base"], shared_dir=state["shared_dir"], root_passthrough_dirs=_passthrough_dirs()
     )
     _log_consistency_warnings(CAMFiles)
 
