@@ -9,7 +9,7 @@ from cam_core.debug import debug_dump_params_and_dir
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", help="Base directory containing .nc files")
-    ap.add_argument("--config", help="Path to fixture_config (JSONC/YAML). Defaults to <base>/fixture_config.txt")
+    ap.add_argument("--config", help="Path to fixture_config (JSONC/YAML). Defaults to <base>/fixture_config.json5")
     ap.add_argument("--xlsx", help="Run XLS batch mode on given workbook")
     ap.add_argument("--verbose", action="store_true", default=False)
     args = ap.parse_args()
@@ -33,7 +33,7 @@ def main():
         return
 
     base = args.base
-    cfg_path = args.config or os.path.join(base, "fixture_config.txt")
+    cfg_path = args.config or os.path.join(base, "fixture_config.json5")
     print(f"[paths] base='{os.path.abspath(base)}'  cfg='{os.path.abspath(cfg_path)}'")
 
     try:

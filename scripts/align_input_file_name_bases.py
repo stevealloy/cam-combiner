@@ -1,12 +1,12 @@
 """
-Reformat the INPUT-FILE-NAME-BASES array in one or more fixture_config.txt
+Reformat the INPUT-FILE-NAME-BASES array in one or more fixture_config.json5
 files so every entry's "required"/"condition"/"alias_of" fields (and any
 trailing "// comment") line up in aligned columns, using spaces only (no
 tabs). Blank separator lines within the array are preserved; commented-out
 entries ("//{ ... }") are aligned alongside active ones.
 
 Usage:
-    python align_input_file_name_bases.py <fixture_config.txt> [<fixture_config.txt> ...]
+    python align_input_file_name_bases.py <fixture_config.json5> [<fixture_config.json5> ...]
 """
 import re
 import sys

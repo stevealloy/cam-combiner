@@ -21,7 +21,7 @@ from cam_core.writer import write_output_file
 
 FIXTURES = Path(__file__).parent.parent / "Testing"
 FB_IN    = FIXTURES / "Fingerboards-in"
-FB_CFG   = FB_IN / "fixture_config.txt"
+FB_CFG   = FB_IN / "fixture_config.json5"
 FB_OUT   = FIXTURES / "Fingerboards-out"
 SHARED   = FIXTURES / "SharedGCode"
 
@@ -174,7 +174,7 @@ def _load_dir(in_dir: Path, session_json: Path = None):
     When session_json is supplied its params and enabled_features override the
     config defaults so the test runs with the same selection as the saved job.
     """
-    cfg = normalize_legacy(load_config_file(str(in_dir / "fixture_config.txt")))
+    cfg = normalize_legacy(load_config_file(str(in_dir / "fixture_config.json5")))
     params = {"Lefty": False, "unit_1_only": False}
     for p in cfg.get("parameters", []):
         name = p.get("name")
@@ -267,7 +267,7 @@ class TestMultiDir:
     """
 
     def test_config_loads(self, in_dir, session_json):
-        cfg = normalize_legacy(load_config_file(str(in_dir / "fixture_config.txt")))
+        cfg = normalize_legacy(load_config_file(str(in_dir / "fixture_config.json5")))
         assert cfg.get("MODEL"), f"{in_dir.name}: config missing MODEL"
         assert "CLINE" in cfg, f"{in_dir.name}: config missing CLINE"
 

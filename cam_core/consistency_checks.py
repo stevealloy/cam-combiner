@@ -12,7 +12,7 @@ from cam_core.cam_file import CAMFile
 #   - idPT09, ftPT30, sdNone               (id/ft/sd + PT-code or "None")
 #   - PT092, PT375                         (bare PT-code)
 #   - NFrets24, Frets24                    (fret count)
-#   - AnyScale, AnyCustomer, AnyNutDepth    (the fixture_config.txt wildcard convention)
+#   - AnyScale, AnyCustomer, AnyNutDepth    (the fixture_config.json5 wildcard convention)
 _PARAM_SEGMENT_RE = re.compile(
     r"^(?:"
     r"[a-z]{1,3}\d+(?:PT\d+)?"

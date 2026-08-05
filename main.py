@@ -697,7 +697,7 @@ def extract_feature_name(newfile):
 
 def capture_files(sdir):
     global current_featureblock
-    skip_files = {"fixture_config.txt", "desktop.ini", "#*", ".*", ".DS_Store"}
+    skip_files = {"fixture_config.json5", "desktop.ini", "#*", ".*", ".DS_Store"}
     if not hasattr(capture_files, "base_featureblock"):
         capture_files.base_featureblock = True
 
@@ -2137,8 +2137,8 @@ def callback_in(sender, app_data):
     config.input_dir = sdir
     config.common_dir = Path(common_in_folder)
 
-    #     read json base_dir/fixture-config.txt
-    cfgfile = sdir / "fixture_config.txt"
+    #     read json base_dir/fixture_config.json5
+    cfgfile = sdir / "fixture_config.json5"
     with open(cfgfile, 'r') as myfile:
         data = myfile.read()
     print(data)

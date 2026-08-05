@@ -678,7 +678,7 @@ def write_output_files():
     lefty = state["params"]["Lefty"]
     base_input_dir = state["base"]
     base_output_dir = state["output_base"]
-    # Fatal error: a required base pattern (fixture_config.txt's "required": true)
+    # Fatal error: a required base pattern (fixture_config.json5's "required": true)
     # matched no file at all for the current parameter selection. Used to be a
     # logged warning only, letting a run silently ship incomplete/wrong output;
     # caught here, before anything is written, so nothing gets generated instead.
@@ -1054,7 +1054,7 @@ def choose_out(sender, app_data):
         dpg.set_value("json_name_val", json_name)
 
     # Auto-select config in base (unchanged behavior)
-    cfg_path = os.path.join(state["output_base"], "fixture_config.txt")
+    cfg_path = os.path.join(state["output_base"], "fixture_config.json5")
     set_cfg(cfg_path)
     _refresh_session_combo()
 
@@ -1071,7 +1071,7 @@ def choose_base(sender, app_data):
         state["output_base"] = out_path
         dpg.set_value("out_val", state["output_base"])
 
-    cfg_path = os.path.join(state["base"], "fixture_config.txt")
+    cfg_path = os.path.join(state["base"], "fixture_config.json5")
     set_cfg(cfg_path)
 
     # Auto-select shared GCode directory: Base/../SharedGCode

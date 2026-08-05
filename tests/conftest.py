@@ -27,9 +27,9 @@ def pytest_addoption(parser):
 
 
 def _model_name(in_dir: Path) -> str:
-    """Return MODEL from fixture_config.txt, or '' on any error."""
+    """Return MODEL from fixture_config.json5, or '' on any error."""
     try:
-        cfg = normalize_legacy(load_config_file(str(in_dir / "fixture_config.txt")))
+        cfg = normalize_legacy(load_config_file(str(in_dir / "fixture_config.json5")))
         return str(cfg.get("MODEL", ""))
     except Exception:
         return ""
@@ -54,7 +54,7 @@ def _collect_pairs(config) -> list[tuple]:
         d for d in base.iterdir()
         if d.is_dir()
         and d.name.endswith("-in")
-        and (d / "fixture_config.txt").exists()
+        and (d / "fixture_config.json5").exists()
     )
 
     pairs: list[tuple] = []

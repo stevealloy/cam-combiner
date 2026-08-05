@@ -202,7 +202,7 @@ def _scan_files_int(base_dir: str, include_ext: Tuple[str,...]=(".nc",), block_p
                      passthrough_dirs: set = frozenset(), rel_path: str = "",
                      force_root: bool = False, root_block: FeatureBlock = None):
     verbose = False
-    skip_files = {"fixture_config.txt", "desktop.ini", "#*", ".*", ".DS_Store"}
+    skip_files = {"fixture_config.json5", "desktop.ini", "#*", ".*", ".DS_Store"}
 
     entries = sorted(os.scandir(base_dir), key=lambda x: getattr(x, 'name'))
 
@@ -242,7 +242,7 @@ def _scan_files_int(base_dir: str, include_ext: Tuple[str,...]=(".nc",), block_p
             child_force_root = force_root or child_rel.lower() in passthrough_dirs
             if child_force_root:
                 # ROOT-PASSTHROUGH-DIRS: this subtree's files are still root/base
-                # files (see fixture_config.txt), just physically organized under
+                # files (see fixture_config.json5), just physically organized under
                 # a subdirectory for scale/caching reasons -- keep them anchored to
                 # the Base block instead of starting a new FeatureBlock. Re-set
                 # current_featureblock explicitly (rather than trusting whatever a

@@ -3,7 +3,7 @@
 CAM Combiner assembles a directory of small, single-purpose `.nc` (G-code)
 files into a set of combined, per-step output programs for a multi-unit CNC
 fixture run. Which small files get pulled into which combined output is
-driven by a declarative `fixture_config.txt` plus a set of parameter choices
+driven by a declarative `fixture_config.json5` plus a set of parameter choices
 and feature checkboxes picked at run time (via the GUI, the CLI, or an Excel
 batch sheet).
 
@@ -19,10 +19,10 @@ This document covers three things in one place:
 
 | Term | Meaning |
 |---|---|
-| **Base directory** (`*-in`) | Folder of source `.nc` files for one fixture/model, plus its `fixture_config.txt`. Files directly in this folder are **base files**; files in subfolders are **feature files**. |
+| **Base directory** (`*-in`) | Folder of source `.nc` files for one fixture/model, plus its `fixture_config.json5`. Files directly in this folder are **base files**; files in subfolders are **feature files**. |
 | **Shared GCode directory** | An optional second folder of base files shared across multiple models (auto-detected as `<base>/../SharedGCode`). Treated as part of the "Base" block. |
 | **Output directory** (`*-out`) | Where combined output files, per-unit folders, session JSON, and logs are written. |
-| **Parameter** | A named, dropdown-driven choice (e.g. `Scale`, `NutWidth`) declared in `fixture_config.txt`. Its value is substituted into base-file name patterns to pick the right source files. |
+| **Parameter** | A named, dropdown-driven choice (e.g. `Scale`, `NutWidth`) declared in `fixture_config.json5`. Its value is substituted into base-file name patterns to pick the right source files. |
 | **Feature** | A toggle (checkbox) corresponding to one logical group of files, auto-discovered from a subfolder of the base directory. Enabling a feature pulls its files into the plan. |
 | **Step** | A two-digit (or letter+two-digit) prefix on a file name (e.g. `05-...`) that determines which combined output file it belongs to. |
 | **Wildcard** | A placeholder file name (e.g. `AnyNutWidth`) that stands in for "any value of this parameter" — see [§7.3](#73-wildcards). |
@@ -61,7 +61,7 @@ python cam_combiner_gui.py
 ![CAM Combiner main window, with a fixture config loaded, Parameters/Features/Files/Tools panels populated, and the Outputs table showing the current plan](images/gui-overview.png)
 
 1. **Choose Base** — pick a `*-in` directory. This:
-   - Auto-loads `fixture_config.txt` from that folder (if present).
+   - Auto-loads `fixture_config.json5` from that folder (if present).
    - Auto-fills the Output directory by swapping the `-in` suffix for `-out`
      (e.g. `Fingerboards-in` → `Fingerboards-out`), if the base path ends in `-in`.
    - Auto-detects a Shared GCode directory at `<base>/../SharedGCode`, if one exists.
@@ -141,7 +141,7 @@ still is.
 
 ```
 <Model>-in/
-    fixture_config.txt
+    fixture_config.json5
     01-blank-prep-s21-ftPT30.nc      <- base file (root of *-in)
     05-profile-s21-nw43-Gibson-...   <- base file
     Neck/                            <- a "feature block" (subfolder)
@@ -164,7 +164,7 @@ still is.
 ```
 
 - **Base files** (root of `*-in`, and everything in the shared dir) are
-  matched against name patterns from `fixture_config.txt`'s
+  matched against name patterns from `fixture_config.json5`'s
   `INPUT-FILE-NAME-BASES`.
 - **Feature files** (anything in a subfolder) are grouped automatically —
   see [§7.4](#74-features-subfolder-files).
@@ -216,7 +216,7 @@ feature name instead of being discarded, since it's identity, not a step.
 
 ---
 
-## 6. `fixture_config.txt` Reference
+## 6. `fixture_config.json5` Reference
 
 Config files are **JSONC**: standard JSON plus `//` line comments, `/* */`
 block comments, and trailing commas before `}`/`]`. Values are read from
@@ -225,7 +225,7 @@ this JSONC-relaxed JSON; if parsing fails, the loader falls back to YAML
 → `True`, `"false"/"no"/"off"` → `False`, `"none"/"null"/""` → `None`, and
 purely numeric strings become `int`/`float`.
 
-A full worked example lives at `Testing/Fingerboards-in/fixture_config.txt`.
+A full worked example lives at `Testing/Fingerboards-in/fixture_config.json5`.
 
 ### 6.1 Top-level keys
 
@@ -260,7 +260,7 @@ A full worked example lives at `Testing/Fingerboards-in/fixture_config.txt`.
 configs but were **never read** by the planner or GUI — `Lefty` and
 "Unit 1 Only" are always GUI-driven toggles (defaulting to off), and
 `MAXUNITS` alone governs unit count. As of 2026-07-20 these three keys have
-been deleted from every `fixture_config.txt` in the repo and on the shared
+been deleted from every `fixture_config.json5` in the repo and on the shared
 build tree; the loader still silently ignores them if present, but don't add
 them to new configs.
 
@@ -577,7 +577,7 @@ python cam_combiner_cli.py --base <path-to-*-in-dir> [--config <path>] [--verbos
 ```
 
 - `--base` — required (unless using `--xlsx`). The `*-in` directory to scan.
-- `--config` — defaults to `<base>/fixture_config.txt`.
+- `--config` — defaults to `<base>/fixture_config.json5`.
 - `--verbose` — dumps parameters and the full directory listing before planning.
 
 The CLI runs `scan_files()` + `plan()` using each parameter's **default**
@@ -694,7 +694,7 @@ python -m pytest tests/ -v --base-dir "<path>"    # point at a real job folder i
 - `tests/test_writer.py` — unit tests for `write_output_file()`.
 - `tests/test_integration.py` + `tests/conftest.py` — **data-driven**
   integration tests. `conftest.py` scans `Testing/` (or `--base-dir`) for
-  every `<Name>-in/` folder containing a `fixture_config.txt`, and for each
+  every `<Name>-in/` folder containing a `fixture_config.json5`, and for each
   one:
   - if the matching `<Name>-out/` folder has curated `*.json` session files
     (excluding the one named after the config's `MODEL`, which is treated
@@ -727,7 +727,7 @@ it's automatically picked up by `conftest.py` — no test code changes needed.
 
 - `LEFTY`, `NUMUNITS`, `HasStartAndEnd` top-level config keys were never read
   by any current code path and have been removed from every
-  `fixture_config.txt` (both `Testing/` fixtures and the shared build tree)
+  `fixture_config.json5` (both `Testing/` fixtures and the shared build tree)
   as of 2026-07-20 (§6.1).
 - `summary.txt` generation (`write_output_files()` in `cam_combiner_gui.py`)
   used to walk `range(0, NUM-STEPS)` and derive each entry's step by

@@ -345,7 +345,7 @@ caching design itself introduces — but it blocked the caching design from
 being useful on `ScriptOutput/`-style trees until fixed, so it's
 documented here as a prerequisite.
 
-**The gap.** `Fingerboards-in/fixture_config.txt:164` declares
+**The gap.** `Fingerboards-in/fixture_config.json5:164` declares
 `05-profile-<Scale>-<NutWidth>-<NutSlot>-<HeelShape>-<NumFrets>` as an
 `INPUT-FILE-NAME-BASES` entry — these files are meant to be matched as
 base/root files. But the real files now live nested three levels deep
@@ -360,7 +360,7 @@ depth, permanently flips a file onto the *feature* code path instead
 leading-prefix-first, per `cam_file.py:63-79`; grouped into
 `CAMFeature`/GUI-checkbox territory instead of matched against
 `INPUT-FILE-NAME-BASES`). So as things stand, `ScriptOutput/Profiles/s24/`
-files would not be picked up as the base files `fixture_config.txt` says
+files would not be picked up as the base files `fixture_config.json5` says
 they are — consistent with ParamBuilder's own memory calling this
 integration "proposed, not confirmed."
 
@@ -379,7 +379,7 @@ depend on the opposite today. `PUPs/`, `Bridges/`, `Controls/`,
 Flattening that default would break every tree that isn't using the
 ParamBuilder mass-generation pattern.
 
-**Proposed: an explicit opt-in, not a new default.** A `fixture_config.txt`
+**Proposed: an explicit opt-in, not a new default.** A `fixture_config.json5`
 key, e.g.:
 
 ```jsonc
@@ -392,7 +392,7 @@ depth beneath it, is treated as `is_root = True` (root/base-file matching
 rules, including step-prefix parsing) instead of being routed into
 `CAMFeature` grouping. Everything not under a declared passthrough path
 keeps exactly today's behavior — this is additive, not a behavior change
-for any existing corpus unless its `fixture_config.txt` opts in.
+for any existing corpus unless its `fixture_config.json5` opts in.
 
 **Where it hooks in:** `_scan_files_int()` (`planner.py:190-233`) needs to
 check, when recursing into a subdirectory, whether it (or an ancestor)

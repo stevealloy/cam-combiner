@@ -1,6 +1,6 @@
 # CAM Fixture Audit — Punch List
 
-Scan of all `fixture_config.txt` and `.nc` files across the 26 `*-in` directories under `Alloy-Standard-Builds-CAM` (the 14 top-level model dirs, 9 `Fixtures/*-fix-in` dirs, and 3 `MoserCAM` dirs), checked against the actual parsing logic in `cam_core/` (`jsonc_loader.py`, `cam_file.py`, `planner.py`).
+Scan of all `fixture_config.json5` and `.nc` files across the 26 `*-in` directories under `Alloy-Standard-Builds-CAM` (the 14 top-level model dirs, 9 `Fixtures/*-fix-in` dirs, and 3 `MoserCAM` dirs), checked against the actual parsing logic in `cam_core/` (`jsonc_loader.py`, `cam_file.py`, `planner.py`).
 
 **Links** are relative to this file's location (`docs/` inside `PycharmProjects/CC2/`) and go up three levels to the `Alloy-Standard-Builds-CAM` root. Open this file in an editor/IDE (PyCharm, VS Code) rather than a plain browser tab for the links to resolve as local file opens. If you move this file, the links break.
 
@@ -185,8 +185,8 @@ Small inconsistencies worth a glance but low risk on their own.
 CLINE: -22.7994 sits next to a comment `// was 22.7982` (positive) in both configs — looks like a recent edit that flipped the sign. Test-in likely copied from/to Fingerboards-in. Test-in itself has since been retired to `_trash`.
 
 Files:
-- [Fingerboards-in/fixture_config.txt](../../../Fingerboards-in/fixture_config.txt)
-- [_trash/Test-in/fixture_config.txt](../../../_trash/Test-in/fixture_config.txt) — retired
+- [Fingerboards-in/fixture_config.json5](../../../Fingerboards-in/fixture_config.json5)
+- [_trash/Test-in/fixture_config.json5](../../../_trash/Test-in/fixture_config.json5) — retired
 
 Status: [ ] Ignore &nbsp;&nbsp; [ ] Auto-fix it &nbsp;&nbsp; [ ] Fixed by me
 
@@ -197,7 +197,7 @@ Note: _(add your note here — how you want this changed)_
 CLINE: -21.00 — may be intentional for this axis convention, but flagged for a human sanity check since other configs use positive values. MoserCAM has since been retired to `_trash`.
 
 Files:
-- [_trash/MoserCAM/Stick-in/fixture_config.txt](../../../_trash/MoserCAM/Stick-in/fixture_config.txt)
+- [_trash/MoserCAM/Stick-in/fixture_config.json5](../../../_trash/MoserCAM/Stick-in/fixture_config.json5)
 
 Status: [ ] Ignore &nbsp;&nbsp; [ ] Auto-fix it &nbsp;&nbsp; [ ] Fixed by me
 
@@ -250,7 +250,7 @@ Tracking what's been moved to `_trash/` during this audit, so it's clear why som
 | `MoserCAM` (all 3 dirs) | `_trash/MoserCAM` | 2026-07-22 | Retired directly by the user. |
 | `Fixtures/LP-fix-in` | `_trash/LP-fix-in-2026-07-22` | 2026-07-22 | Orphaned config (its files didn't match its own OUTPUT-FILE-NAMES at all) — retired whole per user request. |
 | `Fixtures/BAFurguson-fix-in`, `-fix-out` | `_trash/BAFurguson-fix-in-2026-07-22`, `_trash/BAFurguson-fix-out-2026-07-22` | 2026-07-22 | Retired whole per user request (all 10 files were missing their header block entirely, plus a truncated NUM-STEPS sequence). |
-| All contents of `Fixtures/neck-fix-in` and `Fixtures/Fingerboard-fix-in` except `fixture_config.txt` | `_trash/neck-fix-in-2026-07-22`, `_trash/Fingerboard-fix-in-2026-07-22` | 2026-07-22 | Per user request, confirmed first since it also swept up properly-named production files (e.g. `01-neckjig-*`, `BassFB/`) beyond the originally-flagged HSPlatform/Options/add-Bstep-pins issues. |
+| All contents of `Fixtures/neck-fix-in` and `Fixtures/Fingerboard-fix-in` except `fixture_config.json5` | `_trash/neck-fix-in-2026-07-22`, `_trash/Fingerboard-fix-in-2026-07-22` | 2026-07-22 | Per user request, confirmed first since it also swept up properly-named production files (e.g. `01-neckjig-*`, `BassFB/`) beyond the originally-flagged HSPlatform/Options/add-Bstep-pins issues. |
 
 ---
 
