@@ -212,6 +212,7 @@ def _scan_files_int(base_dir: str, include_ext: Tuple[str,...]=(".nc",), block_p
         # process all non-directory entries first
         if not entry.is_dir() and entry.name not in skip_files:
             newfile = CAMFile(entry.name, base_dir, scan_files.current_featureblock.name == "Base")
+            newfile._is_passthrough_dir = force_root
             scan_files.cfiles.append(newfile)
             scan_files.current_featureblock.add_CAM_file(newfile)
             tool = newfile.get_tool()

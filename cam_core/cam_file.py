@@ -43,6 +43,12 @@ class CAMFile:
         self.name = name
         self._dir = directory
         self._is_root = is_root
+        # True for a root file whose is_root came from ROOT-PASSTHROUGH-DIRS
+        # rather than sitting loose in the actual base/shared root -- lets the
+        # GUI identify bulk-generated files (thousands, from e.g. ParamBuilder)
+        # to hide by default without changing base-file matching semantics.
+        # Set by planner.py::_scan_files_int after construction, not here.
+        self._is_passthrough_dir = False
         # self._dir = Path(directory)
 
         self.max_x = -999.99
@@ -260,6 +266,9 @@ class CAMFile:
 
     def is_root(self) -> bool:
         return self._is_root
+
+    def is_passthrough_dir(self) -> bool:
+        return self._is_passthrough_dir
 
     def get_step(self) -> str:
         return self._step

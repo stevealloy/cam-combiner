@@ -42,6 +42,7 @@ state = {
     "unreachable_ids": set(),  # id() of root CAMFiles unreachable by ANY parameter combo
     "_unreachable_cache_key": None,  # (id(CAMFiles), id(cfg)) the above was computed for
     "file_order": {},           # step -> [filename, ...] manual reorder override (Outputs table Up/Down)
+    "show_generated_files": False,  # opt-in: list ROOT-PASSTHROUGH-DIRS files individually in Files/Tools panels
 }
 
 param_based_color = (255, 0, 0, 255)  # red
@@ -72,6 +73,11 @@ def _on_param_change(sender, app_data, user_data):
     state["params"][name] = app_data
 
     run_plan()
+    _refresh_ui(False)
+
+
+def _toggle_show_generated_files(sender, app_data):
+    state["show_generated_files"] = app_data
     _refresh_ui(False)
 
 
@@ -341,17 +347,31 @@ def _refresh_ui(recreate_params: bool):
                     _add_selectable_text(str(tnum))
                     _add_selectable_text(_wrap_for_width(tdesc, 63), width=63, multiline=True, height=100)
                     with dpg.group():
-                        for f in t.get_files():
+                        all_files = t.get_files()
+                        shown = all_files if state["show_generated_files"] else [
+                            f for f in all_files if not f.is_passthrough_dir()
+                        ]
+                        for f in shown:
                             if _is_file_enabled(f):
                                 _add_selectable_text(f.name, color=enabled_tool_color)
                             elif id(f) in state["unreachable_ids"]:
                                 _add_selectable_text(f.name, color=dead_code_color)
                             else:
                                 _add_selectable_text(f.name)
+                        hidden = len(all_files) - len(shown)
+                        if hidden:
+                            _add_selectable_text(f"... {hidden} more (generated, hidden)", color=unmatched_color)
 
 
 
     with (dpg.group(parent="files")):
+        generated_count = sum(1 for f in CAMFiles if f.is_passthrough_dir())
+        if generated_count:
+            dpg.add_checkbox(
+                label=f"Show {generated_count} generated files (ROOT-PASSTHROUGH-DIRS, hidden by default -- slows down this panel)",
+                default_value=state["show_generated_files"],
+                callback=_toggle_show_generated_files,
+            )
         # Only available if scrollX/scrollY are disabled and stretch columns are not used
         with dpg.table(header_row=True,
                        policy=dpg.mvTable_SizingStretchProp,
@@ -369,6 +389,8 @@ def _refresh_ui(recreate_params: bool):
 
             txt_color = param_based_color
             for f in CAMFiles:
+                if f.is_passthrough_dir() and not state["show_generated_files"]:
+                    continue
                 tnum = str(f.get_toolnum())
                 step = str(f.get_step())
                 rule_match = ""
