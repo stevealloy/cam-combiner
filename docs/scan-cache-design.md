@@ -410,7 +410,66 @@ Path-prefix matching relative to `base_dir`/`shared_dir` is unambiguous
 and should be the default assumption unless there's a reason to want
 name-based matching instead.
 
-## 12. Open questions before implementation
+## 12. Tier A implementation (done)
+
+Status: **implemented** (`cam_core/scan_cache.py`, `cam_core/cam_file.py`,
+`cam_core/planner.py`; tests in `tests/test_scan_cache.py`). Two things
+changed from §4-8's original sketch, both discovered while actually
+building it:
+
+- **Per-file cache, not per-chunk digest.** A plain `(path, size,
+  mtime_ns)` check per file turned out simpler to implement than a
+  rolled-up `FeatureBlock`-level digest, and it's strictly finer-grained
+  (catches a single-file edit inside an otherwise-unchanged directory at no
+  extra bookkeeping cost). The chunk/`FeatureBlock` concept from §4 remains
+  the right unit for Tier B's UX (batching the "rematerialize?" prompt,
+  human-readable status lines) but Tier A's actual invalidation mechanism
+  doesn't need it. This also directly answers the standing concern about
+  directory restructuring (subdirectories/nesting changing shape): a
+  moved/renamed file is just "a path not in the cache" — no chunk-boundary
+  bookkeeping to get right, a rescan of the affected files is triggered
+  automatically with no special-casing.
+- **Persisted content-derived fields, not just a staleness signal.** A
+  digest alone only tells you WHETHER something changed, not skips the
+  reparse cost — reconstructing a `CAMFile` still needs its tool/
+  coordinate/feed-rate/MOP-name fields from somewhere. The cache stores
+  those fields directly (`CAMFile.to_cache_fields()` /
+  `_restore_cached_fields()`), and `CAMFile` gained lazy raw-content
+  loading (`_ensure_content_loaded()`, called from `create_unit_code()`)
+  since the raw G-code lines are only actually needed at Generate-Output
+  time, never during Load/scan/matching/display. This resolves open
+  question #2 below: the disk cache is genuinely required, not just a
+  same-session nicety — `scan_files()` always rebuilds its in-memory lists
+  from scratch on every call (`scan_files.cfiles = []` at the top of every
+  invocation), confirmed unchanged.
+
+**Measured against the real `Fingerboards-in` tree** (4150 files, via
+`ROOT-PASSTHROUGH-DIRS`'s `ScriptOutput/` — same config file already
+points at both): cold scan ~21s (unchanged from before this work — the
+first Load after a real change still has to actually read everything),
+warm scan ~0.4s, confirmed stable across 4 consecutive scans, not just two.
+That last check mattered: the first implementation only re-recorded cache
+*misses* into the fresh per-scan cache dict, so a hit's own entry silently
+evaporated after being used once — the cache would go warm, then cold
+again on the third Load. Caught by
+`tests/test_scan_cache.py::test_cache_hit_survives_across_more_than_two_scans`
+before it shipped.
+
+**Verified correct, not just fast:** the full test suite — including
+`test_output_matches_golden`'s byte-for-byte G-code comparison — passes
+identically before and after this change (same 194 passed / 7 skipped / 13
+pre-existing `*-fail-*` failures), and
+`test_cache_hit_file_still_produces_correct_output_on_generate` confirms a
+cache-hit-constructed file's lazily-loaded output matches a freshly-parsed
+file's output exactly.
+
+**No tree insertion**, per the standing constraint: cache lives only in
+`%LOCALAPPDATA%\CC2\scan_cache\`, confirmed with no writes to `G:\` at any
+point during real-tree testing — the "make a copy before testing" caution
+that applies to writing metadata *into* a tree doesn't apply here since
+nothing is written there.
+
+## 13. Open questions before implementation
 
 1. **Is `(cline, clinedelta, direction, num_units)` actually bounded**
    *within each corpus that uses runtime mirroring* (tied to one
@@ -419,32 +478,29 @@ name-based matching instead.
    universal) — check `Fingerboards-in`, `s-in`, `tiltback-necks-in`, and
    `bass-neck-in` (the corpora with zero pre-baked lefty/righty filenames)
    first, since those are the ones where Tier B actually applies.
-2. **In-memory reuse across Loads within one GUI session** vs. the disk
-   cache only helping across separate process launches — does a "Rescan"
-   click within the same running GUI session already keep the old
-   `CAMFile` objects around anywhere they could be reused directly, or does
-   `scan_files()` always rebuild its lists from scratch
-   (`scan_files.cfiles = []` at `planner.py:159`)? If the latter, the disk
-   cache is the only thing that can short-circuit a same-session Rescan too
-   — worth confirming this is desired.
+2. ~~In-memory reuse across Loads within one GUI session vs. the disk cache
+   only helping across separate process launches~~ — **resolved by §12**:
+   `scan_files()` always rebuilds from scratch, so the disk cache is the
+   thing providing the win in both cases, confirmed via the 4-consecutive-
+   scan measurement above.
 3. **Where exactly the Tier B prompt fits in the GUI flow** (modal blocking
    Load, or a non-blocking banner/status the user can act on later) —
    depends on how disruptive a mid-session prompt is to existing workflows.
 
-## 13. Suggested rollout order
+## 14. Suggested rollout order
 
 1. ~~Implement `ROOT-PASSTHROUGH-DIRS` (§11)~~ — **done**, landed first
    since it's small/self-contained and unblocks pointing CC2 at a real
-   `ScriptOutput/`-style tree, which feeds real data into step 4 below.
-2. `scan_cache.py` + digest accumulation in `_scan_files_int` + skip-reparse
-   on hit. No GUI changes yet — this alone gets the Tier A win, and applies
+   `ScriptOutput/`-style tree, which fed real data into step 2.
+2. ~~`scan_cache.py` + skip-reparse on hit (§12)~~ — **done**. Applies
    uniformly to every corpus (neck-family included) regardless of Tier B.
-3. Wire the stale-chunk list into the GUI as a simple status line ("3
-   chunks changed since last scan") before building the full prompt UI —
-   validates the digesting logic against real trees first.
+3. ~~Wire the stale-chunk list into the GUI as a status line~~ —
+   **superseded**: validated directly via `tests/test_scan_cache.py` plus
+   real-tree timing instead of a GUI change; Tier A is designed to be
+   silent/automatic (§7), so no status line is actually needed for it.
 4. Clean up the `Fingerboards-in/ScriptOutput/Profiles/` loose-vs-`s24/`
    duplicate (§10) — unrelated to this design mechanically, but doing it
-   now avoids the digest/materializer ever having to reason about it.
+   now avoids the cache ever having to reason about it.
 5. Answer open question #1 **per corpus that actually uses runtime
    mirroring** (`Fingerboards-in`, `s-in`, `tiltback-necks-in`,
    `bass-neck-in` first).

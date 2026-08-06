@@ -8,6 +8,7 @@ from cam_core.cam_file import CAMFile
 from cam_core.CAMFeature import CAMFeature
 from cam_core.Tool import Tool
 from cam_core.FeatureBlock import FeatureBlock
+from cam_core import scan_cache
 
 def _is_none_value(v: Any) -> bool:
     """True if a resolved parameter value is that parameter's "no such feature"
@@ -175,12 +176,25 @@ def scan_files(base_dir: str, include_ext: Tuple[str,...]=(".nc",), shared_dir: 
 
     passthrough = _normalize_passthrough_dirs(root_passthrough_dirs)
 
-    _scan_files_int(base_dir, include_ext, passthrough_dirs=passthrough, root_block=base_block)
+    # Per-file content cache (cam_core/scan_cache.py): skips re-opening and
+    # re-parsing a file's content when its (size, mtime_ns) hasn't changed
+    # since the last scan of this base_dir/shared_dir pair. old_cache is
+    # read-only lookup data from the last scan; new_cache is built fresh
+    # from whatever's actually seen this walk, so files that no longer
+    # exist (moved, renamed, deleted) simply don't get carried forward.
+    old_cache = scan_cache.load_cache(base_dir, shared_dir)
+    new_cache = {"files": {}}
+
+    _scan_files_int(base_dir, include_ext, passthrough_dirs=passthrough, root_block=base_block,
+                     old_cache=old_cache, new_cache=new_cache)
 
     if shared_dir:
         scan_files.current_featureblock = base_block
         _scan_files_int(shared_dir, include_ext, block_prefix="Shared",
-                         passthrough_dirs=passthrough, root_block=base_block)
+                         passthrough_dirs=passthrough, root_block=base_block,
+                         old_cache=old_cache, new_cache=new_cache)
+
+    scan_cache.save_cache(base_dir, new_cache, shared_dir)
 
     _scan_features()
 
@@ -200,9 +214,12 @@ def scan_files(base_dir: str, include_ext: Tuple[str,...]=(".nc",), shared_dir: 
 
 def _scan_files_int(base_dir: str, include_ext: Tuple[str,...]=(".nc",), block_prefix: str="",
                      passthrough_dirs: set = frozenset(), rel_path: str = "",
-                     force_root: bool = False, root_block: FeatureBlock = None):
+                     force_root: bool = False, root_block: FeatureBlock = None,
+                     old_cache: dict = None, new_cache: dict = None):
     verbose = False
     skip_files = {"fixture_config.json5", "desktop.ini", "#*", ".*", ".DS_Store"}
+    old_cache = old_cache if old_cache is not None else {"files": {}}
+    new_cache = new_cache if new_cache is not None else {"files": {}}
 
     entries = sorted(os.scandir(base_dir), key=lambda x: getattr(x, 'name'))
 
@@ -211,7 +228,16 @@ def _scan_files_int(base_dir: str, include_ext: Tuple[str,...]=(".nc",), block_p
         fname = base_dir + "/" + entry.name
         # process all non-directory entries first
         if not entry.is_dir() and entry.name not in skip_files:
-            newfile = CAMFile(entry.name, base_dir, scan_files.current_featureblock.name == "Base")
+            st = entry.stat()
+            cached_fields = scan_cache.lookup(old_cache, entry.path, st.st_size, st.st_mtime_ns)
+            newfile = CAMFile(entry.name, base_dir, scan_files.current_featureblock.name == "Base",
+                               cached=cached_fields)
+            # Re-record on a hit too (using the same fields, no reparse) --
+            # new_cache is rebuilt from scratch each scan_files() call, so a
+            # hit that isn't re-added here would vanish after exactly one
+            # successful hit instead of persisting across scans.
+            fields = cached_fields if cached_fields is not None else newfile.to_cache_fields()
+            scan_cache.record(new_cache, entry.path, st.st_size, st.st_mtime_ns, fields)
             newfile._is_passthrough_dir = force_root
             scan_files.cfiles.append(newfile)
             scan_files.current_featureblock.add_CAM_file(newfile)
@@ -252,13 +278,13 @@ def _scan_files_int(base_dir: str, include_ext: Tuple[str,...]=(".nc",), block_p
                 # these files to the wrong block.
                 scan_files.current_featureblock = root_block
                 _scan_files_int(fname, include_ext, block_prefix, passthrough_dirs,
-                                 child_rel, True, root_block)
+                                 child_rel, True, root_block, old_cache, new_cache)
             else:
                 block_name = (block_prefix + "/" + entry.name) if block_prefix else entry.name
                 scan_files.current_featureblock = FeatureBlock(block_name, entry.name)
                 scan_files.fblocks.append(scan_files.current_featureblock)
                 _scan_files_int(fname, include_ext, block_name, passthrough_dirs,
-                                 child_rel, False, root_block)
+                                 child_rel, False, root_block, old_cache, new_cache)
 
     return
 

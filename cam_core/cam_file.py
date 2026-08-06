@@ -34,7 +34,7 @@ class Unit:
 
 
 class CAMFile:
-    def __init__(self, name: str, directory: str, is_root: bool):
+    def __init__(self, name: str, directory: str, is_root: bool, cached: dict = None):
         if directory == ".":
             directory = os.getcwd()
         # directory = directory.replace("\\","/")
@@ -124,6 +124,18 @@ class CAMFile:
         if self._debug:
             debug_print("New CAMFile: n:" + self.name + "D:" + directory + "====" + self._dir + " is base?")
 
+        if cached is not None:
+            # scan_cache hit (see cam_core/scan_cache.py): this exact file's
+            # (size, mtime_ns) matched the last scan, so reuse its previously
+            # -derived content fields instead of re-opening/re-parsing it.
+            # Raw _lines/_output stay empty until create_unit_code() actually
+            # needs them (see _ensure_content_loaded) -- Load-time work never
+            # needs the actual G-code text, only these derived scalars.
+            self._content_loaded = False
+            self._restore_cached_fields(cached)
+            return
+
+        self._content_loaded = True
         ##########################################################
         # read the contents of the file into an array
         f = open(self.filename, encoding='utf-8', errors='replace')
@@ -205,6 +217,55 @@ class CAMFile:
             return cls(name, tmpdir, is_root)
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def to_cache_fields(self) -> dict:
+        """JSON-serializable snapshot of every content-derived scalar field
+        (everything __init__ computes from disk except raw _lines, which
+        stays lazy -- see _ensure_content_loaded). Only meaningful right
+        after a fresh, non-cached parse; used by scan_cache.record()."""
+        return {
+            "toolnum": self._toolnum,
+            "tool_num": self._tool.get_tool_num() if self._tool else None,
+            "tool_desc": self._tool.get_desc() if self._tool else None,
+            "min_x": self.min_x, "max_x": self.max_x,
+            "min_y": self.min_y, "max_y": self.max_y,
+            "min_z": self.min_z, "max_z": self.max_z,
+            "min_s": self.min_s, "max_s": self.max_s,
+            "mop_name": self._mop_name,
+            "op_markers": list(self._op_markers),
+            "feed_rates": sorted(self._feed_rates),
+        }
+
+    def _restore_cached_fields(self, cached: dict) -> None:
+        self._toolnum = cached["toolnum"]
+        self._tool = None
+        if cached.get("tool_num") is not None:
+            self._tool = Tool(cached["tool_num"], cached["tool_desc"])
+            self._tool.add_file(self)
+        self.min_x = cached["min_x"]; self.max_x = cached["max_x"]
+        self.min_y = cached["min_y"]; self.max_y = cached["max_y"]
+        self.min_z = cached["min_z"]; self.max_z = cached["max_z"]
+        self.min_s = cached["min_s"]; self.max_s = cached["max_s"]
+        self._mop_name = cached["mop_name"]
+        self._op_markers = list(cached["op_markers"])
+        self._feed_rates = set(cached["feed_rates"])
+
+    def _ensure_content_loaded(self) -> None:
+        """Lazily read this file's raw lines from disk if construction came
+        from a scan_cache hit (see __init__) and nothing has needed the
+        actual G-code text yet. A no-op otherwise. Must run before anything
+        reads self._lines (currently only create_unit_code())."""
+        if self._content_loaded:
+            return
+        self._lines = []
+        f = open(self.filename, encoding='utf-8', errors='replace')
+        for line in f:
+            if line == "X0Y0\n" or line == "G0 X0Y0\n" or line == "X2Y0\n" or line == "G0 X2Y0\n":
+                self._lines.append("HOME\n")
+            else:
+                self._lines.append(line)
+        f.close()
+        self._content_loaded = True
 
     def set_matching_search_string(self, match: str):
         # print(self.name + " setting search string: "+match)
@@ -324,6 +385,7 @@ class CAMFile:
                          clinedelta: float,
                          direction):
 
+        self._ensure_content_loaded()
         self._output = []
         for i in range(0, numUnits):
             self._output.append([])
