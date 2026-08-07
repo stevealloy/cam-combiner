@@ -14,8 +14,29 @@ def _is_none_value(v: Any) -> bool:
     """True if a resolved parameter value is that parameter's "no such feature"
     sentinel -- the literal "None", or a prefixed variant like "rNone"/"sdNone"/
     "NFretsNone" (the same convention consistency_checks.py's _PARAM_SEGMENT_RE
-    already recognizes as a parametric "none" placeholder)."""
-    return isinstance(v, str) and (v == "None" or v.endswith("None"))
+    already recognizes as a parametric "none" placeholder).
+
+    A parameter declared with the bare literal "None" as one of its values
+    (e.g. NutSlot, Inlay) arrives here as Python None, not the string "None"
+    -- jsonc_loader.py's _coerce_scalars() converts any config string
+    matching "none"/"null"/"" (case-insensitive) to a real null during
+    load, before this function ever sees it. Must be checked explicitly, or
+    a legitimate "this feature is turned off" selection renders as the
+    literal text "None" (str(None)) in _render_pattern(), matches no real
+    file, and gets reported as a missing *required* pattern instead of
+    being recognized as intentionally skipped.
+
+    "NoKerf" (KerfStyle's own "no kerf operation" sentinel) is a second,
+    explicit exception -- it breaks the "...None" naming convention every
+    other sentinel here follows, so it can't be caught by the suffix check
+    above. Confirmed independently on the ParamBuilder side: its own
+    fixture_data.py NONE_EQUIVALENT_VALUES dict already excludes exactly
+    {"NutSlot": {"None"}, "KerfStyle": {"NoKerf"}, "NumFrets": {"NFretsNone"}}
+    from its generated checkboxes for the same reason -- these three are
+    each a parameter's "nothing selected" value, not a real generatable one."""
+    if v is None:
+        return True
+    return isinstance(v, str) and (v == "None" or v.endswith("None") or v == "NoKerf")
 
 
 def _param_lookup(parameters: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
