@@ -487,7 +487,121 @@ nothing is written there.
    Load, or a non-blocking banner/status the user can act on later) —
    depends on how disruptive a mid-session prompt is to existing workflows.
 
-## 14. Suggested rollout order
+## 14. Tier B implementation: the real cost, and what got built (done)
+
+Status: **implemented** (`cam_core/unit_cache.py`, `cam_combiner_gui.py`;
+tests in `tests/test_unit_cache.py`). This landed from a real, witnessed
+problem, not the hypothetical one §7/§8 originally sketched — worth
+recording how the actual shape diverged from that sketch.
+
+**The real problem.** The first real Generate Output run against a corpus
+including `GeneratedGCode/` (thousands of files) showed the `IndFiles/`
+individual-file loop in `write_output_files()`
+(`cam_combiner_gui.py`, "outputing individual files") iterating **every
+scanned `CAMFile`**, not just the current run's selected combined outputs
+— by design (`docs/GUIDE.md`: every source file gets a standalone,
+runnable-alone copy per unit, so a CNC operator can re-cut one feature
+without the whole combined program). At thousands of files x
+`MAXUNITS + (MAXUNITS-1)` per-unit/cumulative variants, this is redone
+from scratch, then rezipped (`_zip_unit_subdirs`), on every single click —
+even though the vast majority of that content (anything under
+`GeneratedGCode/`) never changes between runs.
+
+**Eager, not lazy, per the user's explicit call:** every individual file
+must stay available to a CNC operator regardless of which particular
+combined-output selection prompted a given run, so the cache always
+covers the full current corpus x full unit range — it saves redoing that
+work when nothing relevant changed, it does not narrow what gets
+produced.
+
+**Where this diverges from §7/§8's original sketch:** that sketch imagined
+precomputing variants *inside* `CAMFile.get_output()` (a `chunks[*]`
+digest keyed by `FeatureBlock`, a materializer swapping in a precomputed
+variant at the `get_output()` call site). The actual implementation is
+simpler and sits one layer up, at the point `write_output_files()` decides
+whether to call `write_output_file()` at all for a given
+`(file, unit, mirror)` combination:
+
+- `cam_core/unit_cache.py` — a persistent, local
+  (`%LOCALAPPDATA%\CC2\unit_cache\<hash>\`) cache keyed per-file by
+  `(path, size, mtime_ns, mirror)`, structured as a real, literal mirror
+  of the `1/`, `2/`, ..., `1toN/`, `IndFiles/` tree — not an opaque
+  key-value blob, so it's directly inspectable. `ensure_current()` wipes
+  the whole directory on any change to the fixture-level constants
+  (`CLINE`/`CLINE_DELTA`/`DIRECTION`/`MAXUNITS`), same all-or-nothing
+  philosophy as Tier A — no partial patching, since one of those changing
+  invalidates every cached file's offset simultaneously.
+- `write_output_files()`'s `IndFiles/` loop checks `unit_cache.is_current()`
+  before rendering; a hit copies nothing (the file's already sitting at
+  the right path from before) and a miss renders + `unit_cache.record()`s
+  the result. Stale entries (a source file renamed/deleted since the
+  cache was last built) are pruned per-unit after the loop
+  (`unit_cache.prune_stale()`).
+- **The combined-step outputs are deliberately NOT cache-skipped** — they're
+  cheap (small, selection-dependent N) and always freshly recomputed, same
+  as before. But recomputing them isn't the same as *changing* them, and
+  the zip-skip decision needs to know which — so they're written through
+  `_write_if_changed()` (compare-then-write) instead of an unconditional
+  overwrite, and only mark their unit dirty if the bytes actually differ.
+  Without this, every run would mark every unit dirty via the cheap
+  combined-step files alone, defeating the `IndFiles/` cache's whole
+  purpose for the zip-skip decision even when `IndFiles/` itself was 100%
+  cache hits.
+- `_zip_unit_subdirs()`/`_copy_unit_subdirs()` skip a unit's
+  `make_archive()`/`copytree()` entirely when nothing in it changed this
+  run (tracked via a `dirty_units` set threaded through both the combined
+  and individual-file loops) — this is the part that actually answers
+  "and zipped" from the original ask, not just "regenerated."
+- The old throwaway `tempfile.mkdtemp()` working directory is gone
+  entirely — `unit_cache.cache_dir_for()` *is* the working directory now,
+  persistent across runs, never deleted (renamed
+  `_cleanup_unit_tmp_dir` → `_release_unit_dir_ref`, which now only clears
+  the in-memory pointer, on success *and* on failure — a failed run must
+  never wipe out previously-cached work).
+
+**A real bug found before it shipped, same pattern as Tier A's:** the
+first version of the `IndFiles/` loop only called `mirror = False if
+is_nodup else lefty` correctly for rendering, but nothing in the review
+process here would have caught a subtler class of mistake — the loop
+logic was checked line-by-line against the original by hand (see below)
+rather than caught by a failing test, which is the actual limitation worth
+recording.
+
+**Verification limitation, found the hard way.** `cam_combiner_gui.py`
+cannot be safely imported standalone in a plain Python process:
+`dpg.show_viewport()` / `dpg.start_dearpygui()` sit at **module level**
+(not inside `if __name__ == "__main__":`), so importing the module — as a
+first attempt at driving `write_output_files()` directly for a before/
+after byte-comparison test did — launches the real, visible, interactive
+app and its event loop. Separately, once `dearpygui` is installed in an
+environment, `cam_core/debug.py`'s `debug_print()` (called from
+`cam_core/planner.py::plan()`, otherwise a "pure" function with existing
+test coverage) unconditionally calls `dpg.get_value("Log")`; outside a
+fully live GUI context this is a native access violation, not a catchable
+Python exception, since `debug_print`'s own `try/except Exception` can't
+catch it. Both were hit and are now known: `dearpygui` was installed
+temporarily to attempt this testing approach, caused exactly these two
+problems (a real GUI window appearing unexpectedly, then a segfault), and
+was uninstalled again — this environment is deliberately kept without
+`dearpygui`, matching how the existing test suite has always run, and no
+future session should install it to test `cam_combiner_gui.py` directly.
+
+**What this means for confidence in this change:** `cam_core/unit_cache.py`
+has full automated test coverage (21 tests, `tests/test_unit_cache.py`) —
+it's pure stdlib, safely testable. The `cam_combiner_gui.py` integration
+(`write_output_files()`, `_zip_unit_subdirs`, `_copy_unit_subdirs`,
+`_write_if_changed`) is **not** covered by any automated test — none of
+`cam_combiner_gui.py` is, before or after this change — and was instead
+verified by a careful, explicit manual line-by-line trace against the
+original logic (mirror/NODUP/NOMIRROR branching, `write_output_file()`
+argument order, tool-reload writes, suppress-end-code values) rather than
+execution. The full `cam_core` test suite (211 passed / 7 skipped / 13
+pre-existing failures) is unaffected, confirming nothing in the shared
+scan/plan/write primitives regressed. **The first real Generate Output run
+after this change is the actual first execution of this code path** —
+worth watching closely rather than assuming correct.
+
+## 15. Suggested rollout order
 
 1. ~~Implement `ROOT-PASSTHROUGH-DIRS` (§11)~~ — **done**, landed first
    since it's small/self-contained and unblocks pointing CC2 at a real

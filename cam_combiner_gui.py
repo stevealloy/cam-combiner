@@ -11,13 +11,14 @@ from cam_core.consistency_checks import run_all_checks, format_check_results
 from cam_core.reachability import find_unreachable_base_files
 from cam_core.session import save_session, load_session
 from cam_core.debug import debug_dump_all, debug_print
+from cam_core import unit_cache
 from cam_core.cam_file import CAMFile
 from cam_core.CAMFeature import CAMFeature
 from cam_core.Tool import Tool
 from cam_core.FeatureBlock import FeatureBlock
 
 import dearpygui.dearpygui as dpg  # type: ignore
-import os, re, shutil, tempfile, textwrap, csv
+import os, re, shutil, tempfile, textwrap, csv, io
 
 print(GUI_BANNER)
 print("="*40)
@@ -38,7 +39,8 @@ state = {
     "param_help": {},           # config parameter name -> its "help" tooltip text
     "shared_dir": None,
     "json_name": "",            # stem of the session JSON file (no extension)
-    "_unit_tmp_dir": None,      # local scratch dir holding 1/, 1toN/, ... while being built
+    "_unit_tmp_dir": None,      # persistent local unit_cache dir (1/, 1toN/, ...) for this base/shared dir -- see cam_core/unit_cache.py; NOT deleted after use
+    "_unit_dirty": None,       # set of unit labels ("1", "1to2", ...) whose content actually changed this run -- everything else can skip re-zip/copy
     "unreachable_ids": set(),  # id() of root CAMFiles unreachable by ANY parameter combo
     "_unreachable_cache_key": None,  # (id(CAMFiles), id(cfg)) the above was computed for
     "file_order": {},           # step -> [filename, ...] manual reorder override (Outputs table Up/Down)
@@ -551,16 +553,18 @@ def _move_output_file(sender, app_data, user_data):
     run_plan()
 
 
-def _cleanup_unit_tmp_dir():
-    tmp = state.get("_unit_tmp_dir")
-    if tmp:
-        shutil.rmtree(tmp, ignore_errors=True)
-        state["_unit_tmp_dir"] = None
+def _release_unit_dir_ref():
+    """Clears the in-memory reference to this run's unit-tree working
+    directory. Does NOT delete it -- unlike the old throwaway tempdir this
+    replaced, it's the persistent unit_cache tree (see write_output_files
+    and cam_core/unit_cache.py) and must survive across runs/failures."""
+    state["_unit_tmp_dir"] = None
+    state["_unit_dirty"] = None
 
 
 def _generate_output_failed(exc: Exception):
     debug_print(f"[error] Generate Output failed: {exc}")
-    _cleanup_unit_tmp_dir()
+    _release_unit_dir_ref()
     dpg.set_value("status_text", f"ERROR: {exc}")
     dpg.configure_item("generate_output_btn", enabled=True)
 
@@ -612,11 +616,12 @@ def _generate_output_stage_finalize_units(sender=None, app_data=None, user_data=
         units_to_produce = 1 if state["params"]["unit_1_only"] else max_units
         unit_tmp_dir = state.get("_unit_tmp_dir")
         if unit_tmp_dir:
+            dirty_units = state.get("_unit_dirty") or set()
             if state["params"].get("zip_subdirs"):
-                _zip_unit_subdirs(unit_tmp_dir, state["output_base"], units_to_produce)
+                _zip_unit_subdirs(unit_tmp_dir, state["output_base"], units_to_produce, dirty_units)
             else:
-                _copy_unit_subdirs(unit_tmp_dir, state["output_base"], units_to_produce)
-            _cleanup_unit_tmp_dir()
+                _copy_unit_subdirs(unit_tmp_dir, state["output_base"], units_to_produce, dirty_units)
+            _release_unit_dir_ref()
         _generate_output_stage_finish()
     except Exception as e:
         _generate_output_failed(e)
@@ -643,19 +648,50 @@ def _generate_output_stage_finish():
 
 
 
+def _write_if_changed(path, content: str) -> bool:
+    """Write content to path only if it differs from what's already there
+    (or the file doesn't exist yet). Returns True iff the file was actually
+    (re)written -- used to decide whether a unit needs re-zipping, since
+    combined-step outputs are cheap enough to always recompute but the zip
+    step is not.
+
+    Deliberately no explicit encoding= on either open() -- every other
+    output write in this module (open(path, "w")) relies on the platform
+    default, and this must read/write with that exact same assumption to
+    stay behavior-identical to a plain unconditional overwrite."""
+    if os.path.isfile(path):
+        try:
+            with open(path, "r", errors="replace") as f:
+                if f.read() == content:
+                    return False
+        except OSError:
+            pass
+    with open(path, "w") as f:
+        f.write(content)
+    return True
+
+
 def _unit_subdir_names(units_to_produce):
     names = [str(u) for u in range(1, units_to_produce + 1)]
     names += ["1to" + str(n) for n in range(2, units_to_produce + 1)]
     return names
 
 
-def _zip_unit_subdirs(src_dir, dest_dir, units_to_produce):
-    """Zip each per-unit/1toN subdir straight from src_dir into <name>.zip in dest_dir."""
+def _zip_unit_subdirs(src_dir, dest_dir, units_to_produce, dirty_units=None):
+    """Zip each per-unit/1toN subdir straight from src_dir into <name>.zip in dest_dir.
+
+    dirty_units (see unit_cache.py) names the units whose content actually
+    changed this run -- a unit not in that set is skipped IF a zip for it
+    already exists at dest_dir (nothing to redo); a brand-new dest_dir
+    (first run, or a manually-deleted zip) still gets built regardless."""
+    dirty_units = dirty_units or set()
     for name in _unit_subdir_names(units_to_produce):
         subdir = os.path.join(src_dir, name)
         if not os.path.isdir(subdir):
             continue
         zip_base = os.path.join(dest_dir, name)
+        if name not in dirty_units and os.path.exists(zip_base + ".zip"):
+            continue
         if os.path.exists(zip_base + ".zip"):
             os.remove(zip_base + ".zip")
         shutil.make_archive(zip_base, "zip", subdir)
@@ -669,13 +705,20 @@ def _zip_unit_subdirs(src_dir, dest_dir, units_to_produce):
             shutil.rmtree(unzipped_dir)
 
 
-def _copy_unit_subdirs(src_dir, dest_dir, units_to_produce):
-    """Copy each per-unit/1toN subdir tree from src_dir into dest_dir."""
+def _copy_unit_subdirs(src_dir, dest_dir, units_to_produce, dirty_units=None):
+    """Copy each per-unit/1toN subdir tree from src_dir into dest_dir.
+
+    A unit not in dirty_units is skipped IF dest already has a copy of it
+    (nothing changed since that copy was made); missing/first-time copies
+    always happen regardless."""
+    dirty_units = dirty_units or set()
     for name in _unit_subdir_names(units_to_produce):
         subdir = os.path.join(src_dir, name)
         if not os.path.isdir(subdir):
             continue
         dest = os.path.join(dest_dir, name)
+        if name not in dirty_units and os.path.isdir(dest):
+            continue
         if os.path.isdir(dest):
             shutil.rmtree(dest)
         shutil.copytree(subdir, dest)
@@ -720,11 +763,21 @@ def write_output_files():
             "Handedness mismatch: " + format_handedness_orphans(handedness_orphans, bool(lefty))
         )
 
-    # 1/, 2/, ..., 1to2/, ... are built on local disk and only copied/zipped to
-    # base_output_dir once complete, so filling them doesn't round-trip every
-    # single file through a Drive-synced output directory.
-    unit_out_dir = tempfile.mkdtemp(prefix="camcombiner_units_")
+    # 1/, 2/, ..., 1to2/, ... are built in a persistent local cache
+    # (cam_core/unit_cache.py) and only copied/zipped to base_output_dir
+    # once complete, so filling them doesn't round-trip every single file
+    # through a Drive-synced output directory. Persistent (not a throwaway
+    # tempdir) so an unchanged file's per-unit render can be skipped
+    # entirely on the next run instead of always being rebuilt from
+    # scratch -- the individual-files loop below is the one that actually
+    # needs this: it covers every scanned file (thousands, once a corpus
+    # includes ROOT-PASSTHROUGH-DIRS-generated content), not just this
+    # run's selected combined outputs.
+    unit_out_dir = unit_cache.cache_dir_for(base_input_dir, state.get("shared_dir"))
+    unit_manifest = unit_cache.ensure_current(unit_out_dir, unit_cache.fixture_signature(state["cfg"]))
+    dirty_units = set()
     state["_unit_tmp_dir"] = unit_out_dir
+    state["_unit_dirty"] = dirty_units
 
     # create output directories
     if debug_wof:
@@ -882,18 +935,25 @@ def write_output_files():
 
         output_file = open(base_output_dir + "/" + out["name"], "w")
 
+        # Buffered rather than opened directly on disk: the per-unit combined
+        # file is only actually (re)written -- and that unit marked dirty for
+        # the zip/copy stage below -- if its content genuinely differs from
+        # what's already sitting in the persistent unit cache. A rerun with
+        # the same parameter selection and unchanged source files should
+        # cost nothing here, same as the individual-files cache further down.
         output_file_ind_unit = []
+        output_file_ind_unit_paths = []
         for unit in range(0, units_to_produce):
             unit_fn = unit_out_dir + "/" + str(unit+1) + "/" + out["name"]
-            newfile = open(unit_fn, "w")
-            if debug_wof:
-                print("...opening unit output file: ", unit_fn, "result: ", newfile)
-            output_file_ind_unit.append(newfile)
+            output_file_ind_unit.append(io.StringIO())
+            output_file_ind_unit_paths.append((unit_fn, str(unit + 1)))
 
         output_file_1toN = []
+        output_file_1toN_paths = []
         for n in range(2, units_to_produce + 1):
             fn = unit_out_dir + "/1to" + str(n) + "/" + out["name"]
-            output_file_1toN.append(open(fn, "w"))
+            output_file_1toN.append(io.StringIO())
+            output_file_1toN_paths.append((fn, "1to" + str(n)))
 
         lastf = None
         for f in by_step[stepnum]:
@@ -991,37 +1051,53 @@ def write_output_files():
                     nf.write(tool_reload)
 
         output_file.close()
-        for unit in range(0, units_to_produce):
-            output_file_ind_unit[unit].close()
-        for n_file in output_file_1toN:
-            n_file.close()
+        for buf, (unit_fn, unit_label) in zip(output_file_ind_unit, output_file_ind_unit_paths):
+            if _write_if_changed(unit_fn, buf.getvalue()):
+                dirty_units.add(unit_label)
+            buf.close()
+        for buf, (fn, unit_label) in zip(output_file_1toN, output_file_1toN_paths):
+            if _write_if_changed(fn, buf.getvalue()):
+                dirty_units.add(unit_label)
+            buf.close()
 
 
     if debug_wof:
         print("*************** outputing individual files")
+    # unit_label -> set of filenames that belong in its IndFiles/ this run,
+    # used below to prune anything stale (a source file removed/renamed
+    # since the persistent cache was last built) out of the cache tree.
+    written_names_by_unit = {}
     for cfile in CAMFiles:
         # output individual files for each unit, appropriately mirrored if lefty
         fname = cfile.name
+        try:
+            st = os.stat(cfile.filename)
+        except OSError:
+            st = None  # can't identify this file for caching purposes -- always re-render it
+
         for i in range(1, units_to_produce + 1):
-            ofname = unit_out_dir + "/" + str(i) + "/IndFiles/" + fname
-            if re.search("-NODUP", fname):
-                if i == 1:
-                    if debug_wof:
-                        print("     NoDUP. Outputing for unit 1 only")
-                    # no duplication, displacement, do not output to the individual units except for first unit.
-                    # do not suppress end codes
-                    output_file = open(ofname, "w")
-                    write_output_file(cfile, fname, output_file, 1, 1, False,  -1, False, cline, cline_delta, direction)
-                    output_file.close()
-                else:
-                    if debug_wof:
-                        print("     NoDUP. Not outputing for unit ", i)
-            else:
+            unit_label = str(i)
+            is_nodup = bool(re.search("-NODUP", fname))
+            if is_nodup and i != 1:
+                # no duplication, displacement, do not output to the individual units except for first unit.
                 if debug_wof:
-                    print("     Normal file, outputting for unit ", i, "only.")
-                output_file = open(ofname, "w")
-                write_output_file(cfile, fname, output_file, i, 1, lefty, -1, False, cline, cline_delta, direction)
-                output_file.close()
+                    print("     NoDUP. Not outputing for unit ", i)
+                continue
+            written_names_by_unit.setdefault(unit_label, set()).add(fname)
+            mirror = False if is_nodup else lefty
+            rel_path = f"{unit_label}/IndFiles/{fname}"
+            if st is not None and unit_cache.is_current(unit_manifest, unit_out_dir, rel_path, st.st_size, st.st_mtime_ns, mirror):
+                continue  # unchanged since it was last rendered -- reuse as-is
+            dirty_units.add(unit_label)
+            if debug_wof:
+                print("     Normal file, outputting for unit ", i, "only.")
+            ofname = unit_out_dir + "/" + rel_path
+            output_file = open(ofname, "w")
+            # do not suppress end codes -- these are meant to be run independently
+            write_output_file(cfile, fname, output_file, i, 1, mirror, -1, False, cline, cline_delta, direction)
+            output_file.close()
+            if st is not None:
+                unit_cache.record(unit_manifest, rel_path, st.st_size, st.st_mtime_ns, mirror)
 
         # this is not necessary for determining suppression of end codes (since we won't)
         # but is still necessary since it is output in comments into the file
@@ -1036,16 +1112,32 @@ def write_output_files():
         for i in range(2, units_to_produce + 1):
             fname = cfile.name
 
-            ofname = unit_out_dir + "/1to" + str(i) + "/IndFiles/" + fname
             if re.search("-NODUP", fname):
-                # no duplication, displacement, mirroring for this one.
+                # no duplication, displacement, mirroring for this one -- already written above.
                 if debug_wof:
                     print("     NODUP case. This was already written above")
                 continue
+            unit_label = "1to" + str(i)
+            written_names_by_unit.setdefault(unit_label, set()).add(fname)
+            rel_path = f"{unit_label}/IndFiles/{fname}"
+            if st is not None and unit_cache.is_current(unit_manifest, unit_out_dir, rel_path, st.st_size, st.st_mtime_ns, lefty):
+                continue
+            dirty_units.add(unit_label)
             if debug_wof:
-                print("     Normal file, outputting for units [1:", i, "] to ", ofname)
-            with open(ofname, "w") as output_file:
+                print("     Normal file, outputting for units [1:", i, "] to ", unit_out_dir + "/" + rel_path)
+            with open(unit_out_dir + "/" + rel_path, "w") as output_file:
                 write_output_file(cfile, fname, output_file, 1, i, lefty, -1, True, cline, cline_delta, direction)
+            if st is not None:
+                unit_cache.record(unit_manifest, rel_path, st.st_size, st.st_mtime_ns, lefty)
+
+    # Prune stale IndFiles entries: a source file removed/renamed since the
+    # cache was last built must not linger in the persisted tree forever
+    # (it would otherwise keep getting zipped into every future run).
+    for unit_label, expected_names in written_names_by_unit.items():
+        if unit_cache.prune_stale(unit_out_dir, unit_manifest, unit_label, "IndFiles", expected_names):
+            dirty_units.add(unit_label)
+
+    unit_cache.save_manifest(unit_out_dir, unit_manifest)
 
     if 0:
         # create archive files (in, out)
