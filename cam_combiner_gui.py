@@ -1068,6 +1068,19 @@ def write_output_files():
     # since the persistent cache was last built) out of the cache tree.
     written_names_by_unit = {}
     for cfile in CAMFiles:
+        if cfile.is_passthrough_dir():
+            # ROOT-PASSTHROUGH-DIRS (e.g. GeneratedGCode/) files are bulk,
+            # scripted-generation output covering every parameter
+            # combination, not just this job's -- a CNC operator has no use
+            # for a standalone copy of the thousands of combinations that
+            # weren't selected for this job. Whichever of these WERE
+            # selected still appear in the combined step outputs above
+            # exactly as normal; only the "every file individually" IndFiles
+            # tree excludes them. Confirmed live: this also stops a stray
+            # non-.nc file living directly under a passthrough dir (e.g.
+            # GeneratedGCode/dry_run_mop_names.log) from being duplicated
+            # into IndFiles/ as if it were a CAM file.
+            continue
         # output individual files for each unit, appropriately mirrored if lefty
         fname = cfile.name
         try:

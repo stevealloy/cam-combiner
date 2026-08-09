@@ -601,6 +601,33 @@ scan/plan/write primitives regressed. **The first real Generate Output run
 after this change is the actual first execution of this code path** —
 worth watching closely rather than assuming correct.
 
+**Correction from that first real run:** it confirmed the caching mechanics
+worked, but also showed `IndFiles/` still containing every
+`ROOT-PASSTHROUGH-DIRS` file individually — `Fingerboards-out/24989-
+rotondella/1.zip` had 5,845 files in `IndFiles/` alone (~12MB per unit
+zip x 5 units). A CNC operator has no use for a standalone copy of the
+thousands of parameter combinations that weren't selected for a given
+job — only the hand-authored feature files (small N) are the kind of
+"might want to re-cut just this one" file the `IndFiles/` convention was
+built for; whichever `GeneratedGCode`-sourced files *are* selected for a
+job still appear in the combined step outputs exactly as before. Fixed by
+skipping any `cfile.is_passthrough_dir()` file in the `IndFiles/` loop
+entirely (`cam_combiner_gui.py`, "outputing individual files") — reusing
+the same flag added earlier for hiding these files in the GUI's Files/
+Tools panels. Bonus: this also stops a stray non-`.nc` file living
+directly under a passthrough dir (`GeneratedGCode/dry_run_mop_names.log`
+was found riding along, since `scan_files()`'s `include_ext` parameter is
+never actually enforced against scanned entries — a separate, narrower
+pre-existing gap, not fixed here) from being duplicated into `IndFiles/`
+as if it were a CAM file.
+
+Self-healing, no manual cleanup needed: the next Generate Output run's
+`unit_cache.prune_stale()` call sees these files no longer in the
+expected set (since the loop now never adds them), deletes them from the
+persistent cache, marks the affected units dirty, and `_zip_unit_subdirs`
+rebuilds and replaces their `.zip` accordingly — the already-shipped
+bloated zips get corrected in place by simply re-running Generate Output.
+
 ## 15. Suggested rollout order
 
 1. ~~Implement `ROOT-PASSTHROUGH-DIRS` (§11)~~ — **done**, landed first
