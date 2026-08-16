@@ -18,6 +18,8 @@ def save_session(output_dir: str, state: dict, enabled_feature_names: list,
         "params":      {k: v for k, v in state.get("params", {}).items()},
         "enabled_features": list(enabled_feature_names),
         "file_order":  {k: list(v) for k, v in state.get("file_order", {}).items()},
+        "file_exclude": {k: list(v) for k, v in state.get("file_exclude", {}).items()},
+        "file_force_include": list(state.get("file_force_include", [])),
     }
     path = output_dir.rstrip("/\\") + "/" + filename
     with open(path, "w", encoding="utf-8") as f:

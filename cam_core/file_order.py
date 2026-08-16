@@ -23,3 +23,17 @@ def apply_order_override(by_step: Dict[str, List[CAMFile]], order: Dict[str, Lis
         unranked = [f for f in files if f.name not in rank]
         result[step] = ranked + unranked
     return result
+
+
+def apply_exclude_override(by_step: Dict[str, List[CAMFile]], exclude: Dict[str, List[str]]) -> Dict[str, List[CAMFile]]:
+    """Drop user-removed files (Outputs table X button) from each step's file list.
+    Filenames no longer present in by_step (e.g. after a parameter change) are
+    silently ignored -- the override just has no effect for that step.
+    """
+    if not exclude:
+        return by_step
+    result = {}
+    for step, files in by_step.items():
+        removed = set(exclude.get(step) or [])
+        result[step] = [f for f in files if f.name not in removed] if removed else files
+    return result

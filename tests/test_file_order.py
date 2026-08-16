@@ -3,7 +3,7 @@ Unit tests for cam_core/file_order.py.
 Uses CAMFile.from_lines() so no real .nc files are needed.
 """
 from cam_core.cam_file import CAMFile
-from cam_core.file_order import apply_order_override
+from cam_core.file_order import apply_order_override, apply_exclude_override
 
 TOOL_LINE = "(  TOOL 3 - Test Bit - DESC: 0.125 DIA )\n"
 
@@ -54,4 +54,33 @@ def test_multiple_steps_ordered_independently():
     by_step = {"01": [a1, b1], "02": [a2, b2]}
     result = apply_order_override(by_step, {"01": ["01-b.nc", "01-a.nc"]})
     assert result["01"] == [b1, a1]
+    assert result["02"] == [a2, b2]
+
+
+def test_no_exclude_leaves_by_step_untouched():
+    a, b = _file("01-a.nc"), _file("01-b.nc")
+    by_step = {"01": [a, b]}
+    assert apply_exclude_override(by_step, {}) == by_step
+
+
+def test_exclude_removes_named_file():
+    a, b = _file("01-a.nc"), _file("01-b.nc")
+    by_step = {"01": [a, b]}
+    result = apply_exclude_override(by_step, {"01": ["01-a.nc"]})
+    assert result["01"] == [b]
+
+
+def test_exclude_entry_for_a_file_no_longer_present_is_ignored():
+    a = _file("01-a.nc")
+    by_step = {"01": [a]}
+    result = apply_exclude_override(by_step, {"01": ["01-gone.nc"]})
+    assert result["01"] == [a]
+
+
+def test_exclude_multiple_steps_independently():
+    a1, b1 = _file("01-a.nc"), _file("01-b.nc")
+    a2, b2 = _file("02-a.nc"), _file("02-b.nc")
+    by_step = {"01": [a1, b1], "02": [a2, b2]}
+    result = apply_exclude_override(by_step, {"01": ["01-a.nc"]})
+    assert result["01"] == [b1]
     assert result["02"] == [a2, b2]

@@ -81,8 +81,15 @@ class CAMFile:
         # that first resolves the ambiguity without touching root-file step parsing
         # (which has no such marker to prefer and must keep the prefix-first order).
         prefix_match = re.search(r"^([A-Za-z]?\d{2})-", self.name)
-        front_match = re.search(r"(-front)[-\.]", self.name)
-        back_match = re.search(r"(-back)[-\.]", self.name)
+        # [-\.]|$ -- ParamBuilder-generated files (ROOT-PASSTHROUGH-DIRS trees
+        # like GeneratedGCode/) are written with no extension at all, so
+        # "...-front"/"...-back" is sometimes the literal end of the name, not
+        # followed by a "-" or ".". Without the end-of-string alternative here,
+        # e.g. "BackRoundover-T-PT125-01-back" (no ".nc") matches neither
+        # marker, falls through to the "00" bucket below, and silently never
+        # reaches its configured FRONT-STEP/BACK-STEP output.
+        front_match = re.search(r"(-front)(?:[-\.]|$)", self.name)
+        back_match = re.search(r"(-back)(?:[-\.]|$)", self.name)
         if is_root and prefix_match is not None:
             self._step = prefix_match[1]
         elif not is_root and front_match is not None:

@@ -3,7 +3,7 @@ import errno
 from cam_core.version import GUI_BANNER, APP_BANNER, VERSION
 from cam_core.jsonc_loader import load_config_file, normalize_legacy
 from cam_core.planner import plan, scan_files, format_missing_required_patterns
-from cam_core.file_order import apply_order_override
+from cam_core.file_order import apply_order_override, apply_exclude_override
 from cam_core.writer import write_output_file
 from cam_core.tool_conflicts import find_active_tool_conflicts, format_tool_conflicts
 from cam_core.handedness import find_handedness_orphans, format_handedness_orphans
@@ -44,6 +44,8 @@ state = {
     "unreachable_ids": set(),  # id() of root CAMFiles unreachable by ANY parameter combo
     "_unreachable_cache_key": None,  # (id(CAMFiles), id(cfg)) the above was computed for
     "file_order": {},           # step -> [filename, ...] manual reorder override (Outputs table Up/Down)
+    "file_exclude": {},         # step -> [filename, ...] manually removed from combined output (Outputs table X)
+    "file_force_include": [],   # [filename, ...] manually forced into combined output regardless of rule/feature matching (Files panel +/X)
     "show_generated_files": False,  # opt-in: list ROOT-PASSTHROUGH-DIRS files individually in Files/Tools panels
 }
 
@@ -390,6 +392,7 @@ def _refresh_ui(recreate_params: bool):
 
 
             txt_color = param_based_color
+            forced_names = set(state.get("file_force_include", []))
             for f in CAMFiles:
                 if f.is_passthrough_dir() and not state["show_generated_files"]:
                     continue
@@ -424,12 +427,18 @@ def _refresh_ui(recreate_params: bool):
                     txt_color = feature_based_color
 
                 with dpg.table_row():
+                    is_forced = f.name in forced_names
+                    with dpg.group(horizontal=True):
+                        dpg.add_button(label="X" if is_forced else "+", width=18,
+                                       callback=_toggle_file_force_include, user_data=f.name)
+                        if unmatched:
+                            _add_unmatched_name_text(f.name, diff_spans, base_color=txt_color)
+                        else:
+                            _add_selectable_text(f.name, color=txt_color)
                     if unmatched:
-                        _add_unmatched_name_text(f.name, diff_spans, base_color=txt_color)
                         _add_selectable_text(tnum, color=txt_color)
                         _add_selectable_text(step, color=txt_color)
                     else:
-                        _add_selectable_text(f.name, color=txt_color)
                         _add_selectable_text(tnum)
                         _add_selectable_text(step)
                     _add_selectable_text(rule_match)
@@ -485,7 +494,8 @@ def run_plan(sender=None, app_data=None, user_data=None):
                              FeatureBlocks,
                              enabled_features,
                              verbose=False,
-                             req_missing_out=req_missing)
+                             req_missing_out=req_missing,
+                             force_include=state.get("file_force_include", []))
     # Live preview keeps working even when a required pattern currently has
     # no match (e.g. mid-edit) -- only Generate Output (write_output_files())
     # actually enforces this, via the cached list here.
@@ -495,6 +505,9 @@ def run_plan(sender=None, app_data=None, user_data=None):
     # both the Outputs table display AND the actual combined-file write
     # (write_output_files() reads state["by_step"]) see the same order.
     by_step = apply_order_override(by_step, state.get("file_order", {}))
+    full_by_step = by_step  # order-applied but NOT exclude-filtered -- Outputs table
+                             # displays excluded files too (greyed, with a "+" to restore)
+    by_step = apply_exclude_override(by_step, state.get("file_exclude", {}))
 
     # Reachability (is this root file selectable by ANY parameter combination at
     # all, not just the current one?) only depends on the scanned files + config,
@@ -516,22 +529,29 @@ def run_plan(sender=None, app_data=None, user_data=None):
         step = str(out.get("step", ""))
         name = out.get("name", "")
         step_files = by_step.get(step, [])
+        display_files = full_by_step.get(step, [])
+        excluded_names = set(state.get("file_exclude", {}).get(step, []))
         files_str = "\n".join(f"T{str(f.get_toolnum()).zfill(2)} {f.name}" for f in step_files)
         with dpg.table_row(parent="Outputs_table"):
             dpg.add_text(f"{step:02}")
             dpg.add_input_text(default_value=name, readonly=True, width=-1)
             with dpg.group():
-                for i, f in enumerate(step_files):
+                for i, f in enumerate(display_files):
+                    is_excluded = f.name in excluded_names
                     with dpg.group(horizontal=True):
                         dpg.add_button(label="^", width=18, enabled=i > 0,
                                        callback=_move_output_file, user_data=(step, i, -1))
-                        dpg.add_button(label="v", width=18, enabled=i < len(step_files) - 1,
+                        dpg.add_button(label="v", width=18, enabled=i < len(display_files) - 1,
                                        callback=_move_output_file, user_data=(step, i, 1))
-                        _add_selectable_text(f"T{str(f.get_toolnum()).zfill(2)} {f.name}")
+                        dpg.add_button(label="+" if is_excluded else "X", width=18,
+                                       callback=_toggle_output_file_exclude, user_data=(step, f.name))
+                        _add_selectable_text(f"T{str(f.get_toolnum()).zfill(2)} {f.name}",
+                                             color=unmatched_color if is_excluded else None)
         parts += f"{step:02}   {name:35s}{files_str}\n"
     debug_print(parts)
 
     state["resolved"] = resolved
+    state["full_by_step"] = full_by_step
     state["by_step"] = by_step
 
 
@@ -545,12 +565,43 @@ def _move_output_file(sender, app_data, user_data):
     order = state.setdefault("file_order", {})
     current = order.get(step)
     if current is None:
-        current = [f.name for f in state.get("by_step", {}).get(step, [])]
+        current = [f.name for f in state.get("full_by_step", {}).get(step, [])]
     new_index = index + direction
     if 0 <= new_index < len(current):
         current[index], current[new_index] = current[new_index], current[index]
     order[step] = current
     run_plan()
+
+
+def _toggle_output_file_exclude(sender, app_data, user_data):
+    """Toggle a MOP's inclusion in a step's combined output (Outputs table X/+
+    button), persisting the result as this step's manual exclusion going
+    forward -- same override mechanism as _move_output_file, but drops (or
+    restores) the file instead of reordering it. The row stays visible either
+    way, just greyed out and re-labeled "+" while excluded."""
+    step, name = user_data
+    excluded = state.setdefault("file_exclude", {}).setdefault(step, [])
+    if name in excluded:
+        excluded.remove(name)
+    else:
+        excluded.append(name)
+    run_plan()
+
+
+def _toggle_file_force_include(sender, app_data, user_data):
+    """Force a CAM file into its own step's combined output regardless of the
+    planner's rule/feature matching (Files panel +/X button) -- inverse of
+    _toggle_output_file_exclude. Handled inside plan() (see force_include arg)
+    so a forced file gets the same step resolution and FEAT/FIRST/END ordering
+    as a normally-matched file, instead of being spliced in after the fact."""
+    name = user_data
+    forced = state.setdefault("file_force_include", [])
+    if name in forced:
+        forced.remove(name)
+    else:
+        forced.append(name)
+    run_plan()
+    _refresh_ui(False)
 
 
 def _release_unit_dir_ref():
@@ -1269,6 +1320,12 @@ def _apply_session(path: str) -> bool:
 
     # Restore manual Outputs-table file-order overrides (Up/Down buttons)
     state["file_order"] = data.get("file_order", {})
+
+    # Restore manual Outputs-table file-exclude overrides (X button)
+    state["file_exclude"] = data.get("file_exclude", {})
+
+    # Restore manual Files-panel force-include overrides (+/X button)
+    state["file_force_include"] = data.get("file_force_include", [])
 
     # Scan files with restored directories
     CAMFiles, FeatureBlocks, CAMFeatures, CAMTools = scan_files(

@@ -108,6 +108,18 @@ class TestFromLines:
         f = _file("B00-radius-front-01.nc", is_root=True)
         assert f.get_step() == "B00"
 
+    def test_back_step_with_no_file_extension(self):
+        # ParamBuilder-generated files (ROOT-PASSTHROUGH-DIRS trees like
+        # GeneratedGCode/) are written with no extension at all, so "-back" can
+        # be the literal end of the name -- confirmed against a real ST-in
+        # GeneratedGCode filename.
+        f = _file("BackRoundover-T-PT125-01-back", is_root=True)
+        assert f.get_step() == "BACK"
+
+    def test_front_step_with_no_file_extension(self):
+        f = _file("radius-front", is_root=False)
+        assert f.get_step() == "FRONT"
+
 
 # ---------------------------------------------------------------------------
 # plan() — file selection
@@ -211,6 +223,31 @@ class TestPlanSelection:
         _, by_step = plan(cfg, {}, [root_f, feat_f], "", [], [])
         step_files = by_step.get("01", [])
         assert root_f in step_files
+
+    def test_root_file_with_front_suffix_step_routed_to_front_step_config_value(self):
+        # A root file with no leading NN- prefix gets get_step()=="FRONT" (see
+        # TestFromLines.test_front_step) -- the base-pattern matching loop must
+        # substitute cfg["FRONT-STEP"] for that sentinel, same as the Base/
+        # feature-file selection loops do, or the file matches (rule_match set)
+        # but silently never lands in by_step for the real output step.
+        f = _file("PUP-Hum-front.nc")
+        cfg = _cfg("07-front.nc", base_entries=[
+            {"name": "PUP-<PUPType>", "required": "True", "condition": "None"},
+        ])
+        cfg["FRONT-STEP"] = "07"
+        cfg["parameters"] = [{"name": "PUPType", "default": "Hum"}]
+        _, by_step = plan(cfg, {"PUPType": "Hum"}, [f], "", [], [])
+        assert f in by_step.get("07", [])
+
+    def test_root_file_with_back_suffix_step_routed_to_back_step_config_value(self):
+        f = _file("PUP-Hum-back.nc")
+        cfg = _cfg("09-back.nc", base_entries=[
+            {"name": "PUP-<PUPType>", "required": "True", "condition": "None"},
+        ])
+        cfg["BACK-STEP"] = "09"
+        cfg["parameters"] = [{"name": "PUPType", "default": "Hum"}]
+        _, by_step = plan(cfg, {"PUPType": "Hum"}, [f], "", [], [])
+        assert f in by_step.get("09", [])
 
 
 # ---------------------------------------------------------------------------

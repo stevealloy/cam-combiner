@@ -320,7 +320,8 @@ def plan(cfg: Dict[str, Any],
         feature_blocks: list[FeatureBlock],
         features_enabled: list[CAMFeature],
         verbose: bool=False,
-        req_missing_out: list=None):
+        req_missing_out: list=None,
+        force_include: List[str]=None):
     if verbose:
         debug_print("==========================================PLANNER==============================")
 
@@ -451,6 +452,16 @@ def plan(cfg: Dict[str, Any],
                 req_missing.append(patt)
         for m in matches:
             step = alias_step or m.get_step()
+            # A root file with no leading step-digit prefix falls back to the
+            # -front/-back suffix for its step (see CAMFile.__init__), which
+            # leaves it as the raw "FRONT"/"BACK" sentinel here -- substitute
+            # the config's real step number, same as the Base-feature and
+            # enabled-feature selection loops below, or it silently never
+            # matches any output's step and gets dropped from by_step.
+            if step == "FRONT":
+                step = str(cfg.get("FRONT-STEP") or "00")
+            elif step == "BACK":
+                step = str(cfg.get("BACK-STEP") or "00")
             if verbose:
                 debug_print(os.path.basename(m.filename) + "==>" + str(step))
             selected_by_step.setdefault(step, []).append(m)
@@ -504,6 +515,28 @@ def plan(cfg: Dict[str, Any],
                 raw_step = cfg.get("BACK-STEP") or "00"
             fstep = str(f'{raw_step:0>2}')
             selected_by_step.setdefault(fstep, []).append(f)
+
+    # User-forced inclusion (Files panel +/X button): add files the rule/feature
+    # matching above skipped, using the same step-resolution (FRONT/BACK
+    # substitution, zero-pad) as regular feature files so they land in the same
+    # step bucket a real match would have. Files already selected are left alone
+    # (their real matching_search_string is more informative than "(forced)").
+    if force_include:
+        force_names = set(force_include)
+        for f in files:
+            if f.name not in force_names:
+                continue
+            raw_step = str(f.get_step())
+            if raw_step == "FRONT":
+                raw_step = cfg.get("FRONT-STEP") or "00"
+            if raw_step == "BACK":
+                raw_step = cfg.get("BACK-STEP") or "00"
+            fstep = str(f'{raw_step:0>2}')
+            existing = selected_by_step.setdefault(fstep, [])
+            if not any(x is f for x in existing):
+                existing.append(f)
+                if not f.get_matching_search_string():
+                    f.set_matching_search_string("(forced)")
 
     if req_missing:
         debug_print("[warn] required base patterns missing:" + ", ".join(req_missing))
