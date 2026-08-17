@@ -367,6 +367,15 @@ def plan(cfg: Dict[str, Any],
     for k, v in runtime_params.items():
         params.setdefault(k, v)
 
+    # INPUT-FILE-NAME-BASES entries describe root/base files -- files that sit
+    # loose in the model's base dir (or a ROOT-PASSTHROUGH-DIRS subtree), not
+    # inside a feature subdirectory like Options/. Scoping the match to root
+    # files only keeps a required base pattern (e.g. "00-lam-prep") from being
+    # accidentally satisfied by an unchecked feature file that just happens to
+    # share the same leading name -- that file's own feature checkbox is what
+    # should gate its inclusion, not an unrelated base pattern.
+    root_files = [f for f in files if f.is_root()]
+
     for entry in base_entries:
         patt = entry.get("name") if isinstance(entry, dict) else str(entry)
         required = str(entry.get("required", "False")).lower() in ("true","yes","1") if isinstance(entry, dict) else False
@@ -401,7 +410,7 @@ def plan(cfg: Dict[str, Any],
         for concrete, lvl in attempts:
             if verbose:
                 debug_print(f"[debug] pattern concrete='{concrete}'")
-            for m in _match_files(files, concrete):
+            for m in _match_files(root_files, concrete):
                 if id(m) not in seen:
                     seen.add(id(m))
                     matches.append(m)
@@ -429,7 +438,7 @@ def plan(cfg: Dict[str, Any],
             for concrete, lvl in alias_attempts:
                 if verbose:
                     debug_print(f"[debug] alias_of concrete='{concrete}'")
-                for m in _match_files(files, concrete):
+                for m in _match_files(root_files, concrete):
                     if id(m) not in seen:
                         seen.add(id(m))
                         matches.append(m)
