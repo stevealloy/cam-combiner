@@ -224,6 +224,46 @@ class TestPlanSelection:
         step_files = by_step.get("01", [])
         assert root_f in step_files
 
+    def test_base_pattern_ignores_non_root_file_with_matching_prefix(self):
+        # A required base pattern must only be satisfiable by root files. A
+        # feature file (e.g. sitting unchecked in an Options/ subdirectory)
+        # that happens to share the pattern's leading name must not silently
+        # satisfy it -- that would bypass the feature's own checkbox gate.
+        feat_f = _file("00-lam-prep-01-facing-One-to-pt3.nc", is_root=False)
+        cfg = _cfg("00-out.nc", base_entries=[
+            {"name": "00-lam-prep", "required": "True", "condition": "None"},
+        ])
+        req_missing = []
+        _, by_step = plan(cfg, {}, [feat_f], "", [], [], req_missing_out=req_missing)
+        assert feat_f not in by_step.get("00", [])
+        assert req_missing == ["00-lam-prep"]
+
+    def test_root_file_wins_over_identically_named_passthrough_file(self):
+        # GeneratedGCode/ (a ROOT-PASSTHROUGH-DIRS subtree) is treated as root
+        # too, so both files can satisfy the same base pattern. A genuine root
+        # file is a local override of the (possibly shared, assumed-static)
+        # passthrough copy -- it must win, and the passthrough duplicate must
+        # be dropped rather than both being included.
+        root_f = _file("01-A.nc", is_root=True)
+        generated_f = _file("01-A.nc", is_root=True)
+        generated_f._is_passthrough_dir = True
+        cfg = _cfg("01-out.nc", base_entries=[
+            {"name": "01-A", "required": "True", "condition": "None"},
+        ])
+        _, by_step = plan(cfg, {}, [generated_f, root_f], "", [], [])
+        step_files = by_step.get("01", [])
+        assert step_files == [root_f]
+        assert generated_f not in step_files
+
+    def test_passthrough_file_used_when_no_root_override_exists(self):
+        generated_f = _file("01-A.nc", is_root=True)
+        generated_f._is_passthrough_dir = True
+        cfg = _cfg("01-out.nc", base_entries=[
+            {"name": "01-A", "required": "True", "condition": "None"},
+        ])
+        _, by_step = plan(cfg, {}, [generated_f], "", [], [])
+        assert by_step.get("01", []) == [generated_f]
+
     def test_root_file_with_front_suffix_step_routed_to_front_step_config_value(self):
         # A root file with no leading NN- prefix gets get_step()=="FRONT" (see
         # TestFromLines.test_front_step) -- the base-pattern matching loop must

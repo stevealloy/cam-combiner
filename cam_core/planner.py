@@ -376,6 +376,19 @@ def plan(cfg: Dict[str, Any],
     # should gate its inclusion, not an unrelated base pattern.
     root_files = [f for f in files if f.is_root()]
 
+    # A ROOT-PASSTHROUGH-DIRS file (e.g. GeneratedGCode/) is a physically
+    # relocated root file, treated as a read-only, possibly-shared default.
+    # A genuine root file with the identical name is a local override -- it
+    # wins, and the passthrough copy is dropped so it never also matches,
+    # letting a bug fix or one-off override be dropped into the model dir
+    # without touching (or duplicating output from) the shared generated tree.
+    _root_by_name: Dict[str, CAMFile] = {}
+    for f in root_files:
+        existing = _root_by_name.get(f.name)
+        if existing is None or (existing.is_passthrough_dir() and not f.is_passthrough_dir()):
+            _root_by_name[f.name] = f
+    root_files = list(_root_by_name.values())
+
     for entry in base_entries:
         patt = entry.get("name") if isinstance(entry, dict) else str(entry)
         required = str(entry.get("required", "False")).lower() in ("true","yes","1") if isinstance(entry, dict) else False
