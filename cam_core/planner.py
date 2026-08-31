@@ -248,7 +248,8 @@ def _scan_files_int(base_dir: str, include_ext: Tuple[str,...]=(".nc",), block_p
     for entry in entries:
         fname = base_dir + "/" + entry.name
         # process all non-directory entries first
-        if not entry.is_dir() and entry.name not in skip_files:
+        ext = os.path.splitext(entry.name)[1].lower()
+        if not entry.is_dir() and entry.name not in skip_files and ext in include_ext:
             st = entry.stat()
             cached_fields = scan_cache.lookup(old_cache, entry.path, st.st_size, st.st_mtime_ns)
             newfile = CAMFile(entry.name, base_dir, scan_files.current_featureblock.name == "Base",
@@ -284,6 +285,8 @@ def _scan_files_int(base_dir: str, include_ext: Tuple[str,...]=(".nc",), block_p
     for entry in entries:
         fname = base_dir + "/" + entry.name
         if entry.is_dir():
+            if entry.name.startswith("."):
+                continue  # skip dot-directories (e.g. .idea, .git)
             if verbose:
                 debug_print("DIR:" + entry.name)
             child_rel = f"{rel_path}/{entry.name}" if rel_path else entry.name

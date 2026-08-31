@@ -317,14 +317,15 @@ def _refresh_ui(recreate_params: bool):
     # update_model_params:
     with dpg.group(parent="model_params"):
         dpg.add_text("Model And Fixture Parameters:")
+        cfg = state["cfg"] or {}
         model_lines = [
-            "   Model       = " + str(state["cfg"]["MODEL"]),
-            "   Center Line = " + str(state["cfg"]["CLINE"]),
-            "   CL-to-CL    = " + str(state["cfg"]["CLINE_DELTA"]),
-            "   Max Units   = " + str(state["cfg"]["MAXUNITS"]),
-            "   Direction   = " + str(state["cfg"]["DIRECTION"]),
-            "   Front Step  = " + str(state["cfg"].get("FRONT-STEP", "")),
-            "   Back Step   = " + str(state["cfg"].get("BACK-STEP", "")),
+            "   Model       = " + str(cfg.get("MODEL", "")),
+            "   Center Line = " + str(cfg.get("CLINE", "")),
+            "   CL-to-CL    = " + str(cfg.get("CLINE_DELTA", "")),
+            "   Max Units   = " + str(cfg.get("MAXUNITS", "")),
+            "   Direction   = " + str(cfg.get("DIRECTION", "")),
+            "   Front Step  = " + str(cfg.get("FRONT-STEP", "")),
+            "   Back Step   = " + str(cfg.get("BACK-STEP", "")),
         ]
         dpg.add_input_text(default_value="\n".join(model_lines), multiline=True, readonly=True,
                            width=-1, height=_multiline_height(len(model_lines)))
@@ -403,7 +404,7 @@ def _refresh_ui(recreate_params: bool):
                 diff_spans = []
                 if f.is_root():
                     # Root directory files (project root or shared root). if params are active: param color else root color
-                    if "INPUT-FILE-NAME-BASES" in state["cfg"]:
+                    if "INPUT-FILE-NAME-BASES" in (state["cfg"] or {}):
                         # param based
                         rule_match = f.get_matching_search_string()
                         if rule_match:
