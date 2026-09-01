@@ -33,10 +33,22 @@ def _is_none_value(v: Any) -> bool:
     fixture_data.py NONE_EQUIVALENT_VALUES dict already excludes exactly
     {"NutSlot": {"None"}, "KerfStyle": {"NoKerf"}, "NumFrets": {"NFretsNone"}}
     from its generated checkboxes for the same reason -- these three are
-    each a parameter's "nothing selected" value, not a real generatable one."""
+    each a parameter's "nothing selected" value, not a real generatable one.
+
+    The reverse case also happens: "HSPlateNone" (HSPlate's "no headstock
+    plate installed" value) *does* fit the "...None" suffix convention but
+    is a genuine, geometry-bearing option -- ThroughNeck-in has real carve
+    files for it (12-HSFrontCarve-...-HSPlateNone-FStyle-bt{1,2,3,4}-...).
+    Treating it as the sentinel skips matching for its whole base pattern
+    entirely (0 files "expected"), so an exact on-disk match for it never
+    gets picked up. Excluded here for the same reason NoKerf is included."""
     if v is None:
         return True
-    return isinstance(v, str) and (v == "None" or v.endswith("None") or v == "NoKerf")
+    if not isinstance(v, str):
+        return False
+    if v == "HSPlateNone":
+        return False
+    return v == "None" or v.endswith("None") or v == "NoKerf"
 
 
 def _param_lookup(parameters: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
