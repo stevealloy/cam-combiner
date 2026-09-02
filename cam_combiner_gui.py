@@ -60,6 +60,7 @@ mismatch_highlight_color = (255, 140, 0, 255)  # orange: the part of the name th
 help_indicator_color = (100, 170, 220, 255)  # muted cyan: "?" marker on parameters with help text
 dead_code_color = (220, 60, 60, 255)  # red: root file unreachable by ANY parameter combination
 status_color = (255, 200, 0, 255)  # amber: "Generate Output" is currently running
+missing_required_color = (255, 0, 220, 255)  # magenta: required base pattern matched no file, Outputs table
 
 CAMFiles: list[CAMFile] = []           # CAMFile objects
 CAMFeatures: list[CAMFeature] = []      # CAMFeature objects
@@ -523,6 +524,16 @@ def run_plan(sender=None, app_data=None, user_data=None):
         state["unreachable_ids"] = {id(f) for f in unreachable}
         state["_unreachable_cache_key"] = cache_key
 
+    # Bucket missing required base patterns by the step number embedded in their
+    # own name (e.g. "12-HSFrontCarve-..." -> "12") so each one can be surfaced
+    # right at the top of the Outputs-table row for the step it would have fed,
+    # instead of only showing up in the Generate Output error dialog.
+    missing_by_step: dict[str, list[str]] = {}
+    for patt in req_missing:
+        m = re.search(r"(\d{2})", patt)
+        missing_by_step.setdefault(m.group(1) if m else "", []).append(patt)
+    consumed_missing_steps = set()
+
     # List the planned file outputs to the "Outputs" window
     dpg.delete_item("Outputs_table", children_only=True, slot=1)
     parts = ""
@@ -533,10 +544,15 @@ def run_plan(sender=None, app_data=None, user_data=None):
         display_files = full_by_step.get(step, [])
         excluded_names = set(state.get("file_exclude", {}).get(step, []))
         files_str = "\n".join(f"T{str(f.get_toolnum()).zfill(2)} {f.name}" for f in step_files)
+        missing_here = missing_by_step.get(step.zfill(2), [])
+        consumed_missing_steps.add(step.zfill(2))
         with dpg.table_row(parent="Outputs_table"):
             dpg.add_text(f"{step:02}")
             dpg.add_input_text(default_value=name, readonly=True, width=-1)
             with dpg.group():
+                for patt in missing_here:
+                    _add_selectable_text(f"⚠ MISSING REQUIRED MATCH: {patt}",
+                                         color=missing_required_color)
                 for i, f in enumerate(display_files):
                     is_excluded = f.name in excluded_names
                     with dpg.group(horizontal=True):
@@ -549,6 +565,21 @@ def run_plan(sender=None, app_data=None, user_data=None):
                         _add_selectable_text(f"T{str(f.get_toolnum()).zfill(2)} {f.name}",
                                              color=unmatched_color if is_excluded else None)
         parts += f"{step:02}   {name:35s}{files_str}\n"
+
+    # A missing pattern whose embedded step doesn't match any actual output row
+    # (e.g. the config's outputs list doesn't cover that step at all) would
+    # otherwise vanish silently -- surface it in its own row instead.
+    for step_key, patts in missing_by_step.items():
+        if step_key in consumed_missing_steps:
+            continue
+        with dpg.table_row(parent="Outputs_table"):
+            dpg.add_text(step_key or "??")
+            dpg.add_input_text(default_value="(no output uses this step)", readonly=True, width=-1)
+            with dpg.group():
+                for patt in patts:
+                    _add_selectable_text(f"⚠ MISSING REQUIRED MATCH: {patt}",
+                                         color=missing_required_color)
+
     debug_print(parts)
 
     state["resolved"] = resolved
