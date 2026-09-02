@@ -42,7 +42,20 @@ def main():
         print(f"[warn] failed to load config: {e}")
         cfg = {"parameters": [], "outputs": [], "base_selection": {"input_file_base_names": []}}
 
-    params = {p["name"]: p.get("default") for p in cfg.get("parameters",[]) if isinstance(p, dict) and p.get("name")}
+    def _default_value(p):
+        # A "multi":true parameter (see fixture_config.json5) carries a LIST of
+        # selected values at runtime, not one scalar -- match the GUI's default
+        # seeding (set_cfg() in cam_combiner_gui.py) so CLI runs behave the same.
+        default = p.get("default")
+        if not p.get("multi", False):
+            return default
+        if isinstance(default, list):
+            return list(default)
+        if default is None or str(default).strip().lower() in ("none", "null", ""):
+            return []
+        return [default]
+
+    params = {p["name"]: _default_value(p) for p in cfg.get("parameters", []) if isinstance(p, dict) and p.get("name")}
 
     files, fblocks, features, tools = scan_files(base, root_passthrough_dirs=cfg.get("root_passthrough_dirs", []))
     if args.verbose:

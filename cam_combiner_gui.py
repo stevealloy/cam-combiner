@@ -10,7 +10,7 @@ from cam_core.handedness import find_handedness_orphans, format_handedness_orpha
 from cam_core.consistency_checks import run_all_checks, format_check_results
 from cam_core.reachability import find_unreachable_base_files
 from cam_core.session import save_session, load_session
-from cam_core.debug import debug_dump_all, debug_print
+from cam_core.debug import debug_dump_all, debug_print, mark_gui_active
 from cam_core import unit_cache
 from cam_core.cam_file import CAMFile
 from cam_core.CAMFeature import CAMFeature
@@ -26,6 +26,7 @@ print(APP_BANNER)
 print("="*40)
 
 dpg.create_context()
+mark_gui_active()  # debug_print() may now safely touch dpg -- see cam_core/debug.py
 dpg.create_viewport(title=f"CAM Combiner {VERSION}", width=2304, height=1248)
 
 state = {
@@ -37,6 +38,7 @@ state = {
     "param_values": {},         # dynamic value of string to use in gui for choices
     "param_block": {},          # config parameter name -> its "block" grouping label
     "param_help": {},           # config parameter name -> its "help" tooltip text
+    "param_multi": set(),       # names of parameters declared "multi":true -- checkbox-list widget, list-valued
     "shared_dir": None,
     "json_name": "",            # stem of the session JSON file (no extension)
     "_unit_tmp_dir": None,      # persistent local unit_cache dir (1/, 1toN/, ...) for this base/shared dir -- see cam_core/unit_cache.py; NOT deleted after use
@@ -76,6 +78,23 @@ def _on_param_change(sender, app_data, user_data):
     """Combo callback: keep state['params'] in sync with GUI."""
     name = user_data
     state["params"][name] = app_data
+
+    run_plan()
+    _refresh_ui(False)
+
+
+def _on_multi_param_toggle(sender, app_data, user_data):
+    """Checkbox callback for a multi-select parameter (param name, this box's
+    value) -- adds/removes just that one value from state['params'][name],
+    which holds the full list of currently-selected values for the param."""
+    name, value = user_data
+    selected = state["params"].setdefault(name, [])
+    if app_data:
+        if value not in selected:
+            selected.append(value)
+    else:
+        if value in selected:
+            selected.remove(value)
 
     run_plan()
     _refresh_ui(False)
@@ -243,6 +262,28 @@ def _refresh_ui(recreate_params: bool):
                 if block and block != last_block:
                     dpg.add_separator(label=block, parent="Parameters")
                     last_block = block
+                if p in state.get("param_multi", set()):
+                    # Multi-select: several values can be active at once (e.g.
+                    # ControlItemType -- a real instrument can have several control
+                    # items installed simultaneously). One checkbox per allowed
+                    # value instead of a single combo; "None" (an explicit
+                    # "nothing" placeholder in some configs) never gets its own
+                    # checkbox since an empty selection already means that.
+                    with dpg.group(horizontal=False, parent="Parameters"):
+                        with dpg.group(horizontal=True):
+                            dpg.add_text(p, color=param_based_color)
+                            _add_help_marker(state["param_help"].get(p))
+                        selected = state["params"].get(p, [])
+                        for v in state["param_values"][p]:
+                            # jsonc_loader coerces a literal "None" value to Python
+                            # None, which set_cfg()'s items_str build then renders
+                            # as "" here -- either way it's the "nothing selected"
+                            # placeholder, already covered by an empty list.
+                            if v in ("None", ""):
+                                continue
+                            dpg.add_checkbox(label=v, default_value=(v in selected),
+                                             callback=_on_multi_param_toggle, user_data=(p, v))
+                    continue
                 with dpg.group(horizontal=True, parent="Parameters"):
                      # Label + combo per parameter
                     if state["param_values"][p] == "":
@@ -296,7 +337,9 @@ def _refresh_ui(recreate_params: bool):
     # Mirror a readable dump of params + enabled features in the Options text box (handy for copy/paste)
     with dpg.group(parent="Options"):
         dpg.add_text("Chosen Options:")
-        chosen_lines = [f"{k:20s} = {v}" for k, v in sorted(state["params"].items())]
+        def _fmt_option(v):
+            return ", ".join(v) if isinstance(v, list) else v
+        chosen_lines = [f"{k:20s} = {_fmt_option(v)}" for k, v in sorted(state["params"].items())]
         dpg.add_input_text(default_value="\n".join(chosen_lines), multiline=True, readonly=True,
                            width=-1, height=_multiline_height(len(chosen_lines)))
 
@@ -1509,6 +1552,7 @@ def set_cfg(path):
     state["params"] = {}
     state["param_block"] = {}
     state["param_help"] = {}
+    state["param_multi"] = set()  # names of parameters declared "multi":true -- checkbox-list widget, list-valued
     state["params"]["Lefty"] = False
     state["param_values"]["Lefty"] = ""
     state["params"]["unit_1_only"] = False
@@ -1535,8 +1579,21 @@ def set_cfg(path):
         default = p.get("default")
         default_str = "" if default is None else str(default)
 
-        # Seed state with defaults
-        state["params"][name] = default_str
+        # Seed state with defaults. A "multi":true parameter (e.g. ControlItemType --
+        # a real instrument can have several control items installed at once, each
+        # with its own on-disk file) stores a LIST of currently-selected values
+        # instead of one scalar -- see _refresh_ui's checkbox-list rendering and
+        # plan()'s per-selected-value matching for the other half of this.
+        if p.get("multi", False):
+            state["param_multi"].add(name)
+            if isinstance(default, list):
+                state["params"][name] = ["" if v is None else str(v) for v in default]
+            elif default is None or default_str.strip().lower() in ("none", "null", ""):
+                state["params"][name] = []
+            else:
+                state["params"][name] = [default_str]
+        else:
+            state["params"][name] = default_str
         state["param_values"][name] = items_str
         block = p.get("block")
         if block:

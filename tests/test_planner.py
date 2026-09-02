@@ -535,6 +535,61 @@ class TestPlanRequiredMissing:
         assert "02-radius-r12-s21-final" in msg
 
 
+# ---------------------------------------------------------------------------
+# plan() — multi-select parameters (runtime value is a list, e.g. ControlItemType
+# where a real instrument can have several control items -- Pot1, Pot2, a
+# switch -- at once, each with its own on-disk file).
+# ---------------------------------------------------------------------------
+
+class TestPlanMultiSelectParams:
+    def test_all_selected_values_matched_land_in_same_step(self):
+        f1 = _file("12-Control-TRear-Pot1-bt2-01.nc")
+        f2 = _file("12-Control-TRear-Pot2-bt2-01.nc")
+        cfg = _cfg("12-out.nc", base_entries=[
+            {"name": "12-Control-TRear-<ControlItemType>-bt2", "required": "True", "condition": "None"}
+        ])
+        req_missing = []
+        _, by_step = plan(cfg, {"ControlItemType": ["Pot1", "Pot2"]}, [f1, f2], "", [], [],
+                          req_missing_out=req_missing)
+        assert req_missing == []
+        assert sorted(f.name for f in by_step["12"]) == sorted([f1.name, f2.name])
+
+    def test_one_unmatched_selected_value_reported_individually(self):
+        # Pot1 has a real file, Pot2 doesn't -- required, so only Pot2's absence
+        # should be reported (Pot1 must not be swallowed by "something matched").
+        f1 = _file("12-Control-TRear-Pot1-bt2-01.nc")
+        cfg = _cfg("12-out.nc", base_entries=[
+            {"name": "12-Control-TRear-<ControlItemType>-bt2", "required": "True", "condition": "None"}
+        ])
+        req_missing = []
+        _, by_step = plan(cfg, {"ControlItemType": ["Pot1", "Pot2"]}, [f1], "", [], [],
+                          req_missing_out=req_missing)
+        assert len(req_missing) == 1
+        assert "Pot2" in req_missing[0]
+        assert "Pot1" not in req_missing[0]
+        assert [f.name for f in by_step["12"]] == [f1.name]
+
+    def test_empty_selection_satisfied_with_zero_files_even_if_required(self):
+        cfg = _cfg("12-out.nc", base_entries=[
+            {"name": "12-Control-TRear-<ControlItemType>-bt2", "required": "True", "condition": "None"}
+        ])
+        req_missing = []
+        _, by_step = plan(cfg, {"ControlItemType": []}, [], "", [], [], req_missing_out=req_missing)
+        assert req_missing == []
+        assert by_step == {}
+
+    def test_unmatched_selected_value_not_reported_when_not_required(self):
+        f1 = _file("12-Control-TRear-Pot1-bt2-01.nc")
+        cfg = _cfg("12-out.nc", base_entries=[
+            {"name": "12-Control-TRear-<ControlItemType>-bt2", "required": "False", "condition": "None"}
+        ])
+        req_missing = []
+        _, by_step = plan(cfg, {"ControlItemType": ["Pot1", "Pot2"]}, [f1], "", [], [],
+                          req_missing_out=req_missing)
+        assert req_missing == []
+        assert [f.name for f in by_step["12"]] == [f1.name]
+
+
 class TestPlanRequiredGroup:
     def test_group_satisfied_when_one_member_matches(self):
         # Neither member is individually matched by every file, but as long as

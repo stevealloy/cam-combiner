@@ -3,6 +3,21 @@ try:
 except ModuleNotFoundError:
     dpg = None
 
+# Set True by cam_combiner_gui.py right after dpg.create_context() actually
+# runs. Almost every dearpygui call (including simple getters like
+# is_dearpygui_running()) is unsafe before a context exists -- on this
+# native build it can segfault the whole process instead of raising a
+# catchable Python exception, which the try/except below can't stop. Every
+# other cam_core caller (tests, cam_combiner_cli.py, plan() itself) imports
+# and calls debug_print without ever creating a dpg context, so this must
+# default to off.
+_gui_active = False
+
+
+def mark_gui_active():
+    global _gui_active
+    _gui_active = True
+
 def debug_dump_all(base_dir: str,
                    params: dict,
                    files,#: list[CAMFile],
@@ -33,6 +48,8 @@ def debug_dump_all(base_dir: str,
 def debug_print(*args):
     message = " ".join(str(a) for a in args)
     print("[debug] " + message)
+    if not _gui_active:
+        return
     try:
         current_text = dpg.get_value("Log")
         dpg.set_value("Log", current_text + message + "\n")

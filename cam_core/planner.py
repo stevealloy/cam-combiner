@@ -426,27 +426,56 @@ def plan(cfg: Dict[str, Any],
                 debug_print(f"[base] {patt}: a token is a 'None' sentinel -- satisfied, 0 files")
             continue
 
+        # multi-select tokens (parameter declared "multi":true, e.g. ControlItemType
+        # -- a guitar can have several control items at once, each with its own
+        # on-disk file) carry a list of selected values instead of one scalar.
+        # Each selected value is resolved independently (its own exact/wildcard
+        # attempts via _render_pattern, held against the other tokens unchanged)
+        # and the matches are unioned into this entry -- same as picking several
+        # single-select values in separate runs and combining the results. An
+        # empty selection is "intentionally nothing chosen", same as a None
+        # sentinel: satisfied, 0 files, no missing-required warning.
+        multi_tokens = [t for t in pattern_tokens if isinstance(params.get(t), (list, tuple, set))]
+        if multi_tokens and any(len(params.get(t) or ()) == 0 for t in multi_tokens):
+            if verbose:
+                debug_print(f"[base] {patt}: a multi-select token has nothing selected -- satisfied, 0 files")
+            continue
+        if multi_tokens:
+            value_lists = [list(params[t]) for t in multi_tokens]
+            variants = [dict(zip(multi_tokens, combo)) for combo in itertools.product(*value_lists)]
+        else:
+            variants = [{}]
+
         # Wildcard substitutions are treated as base files: every attempt level
         # (exact and each wildcard combination) is searched and matches are
         # unioned, rather than stopping once the exact match is found. Matches
         # are then ordered as if every wildcard had been resolved to its real
         # value, so wildcard files fall in sequence with non-wildcard files
         # instead of being grouped by which attempt level found them.
-        attempts, wc_to_value = _render_pattern(patt, params, pmap)
         matches = []
         seen = set()
-        for concrete, lvl in attempts:
-            if verbose:
-                debug_print(f"[debug] pattern concrete='{concrete}'")
-            for m in _match_files(root_files, concrete):
-                if id(m) not in seen:
-                    seen.add(id(m))
-                    matches.append(m)
-            for m in files:
-                diff_count, spans = _token_diff(m.name, concrete)
-                prev = best_diff.get(id(m))
-                if prev is None or diff_count < prev[0]:
-                    best_diff[id(m)] = (diff_count, spans)
+        wc_to_value: Dict[str, str] = {}
+        unmatched_variants = []  # multi-select variants that themselves matched nothing
+        for variant in variants:
+            variant_params = dict(params, **variant) if variant else params
+            attempts, variant_wc_to_value = _render_pattern(patt, variant_params, pmap)
+            wc_to_value.update(variant_wc_to_value)
+            variant_matched = False
+            for concrete, lvl in attempts:
+                if verbose:
+                    debug_print(f"[debug] pattern concrete='{concrete}'")
+                for m in _match_files(root_files, concrete):
+                    variant_matched = True
+                    if id(m) not in seen:
+                        seen.add(id(m))
+                        matches.append(m)
+                for m in files:
+                    diff_count, spans = _token_diff(m.name, concrete)
+                    prev = best_diff.get(id(m))
+                    if prev is None or diff_count < prev[0]:
+                        best_diff[id(m)] = (diff_count, spans)
+            if multi_tokens and not variant_matched:
+                unmatched_variants.append(variant)
         matches.sort(key=lambda m: _resolved_sort_key(m.name, wc_to_value))
 
         # alias_of: if this entry's own pattern found nothing, fall back to matching
@@ -481,10 +510,25 @@ def plan(cfg: Dict[str, Any],
             debug_print(f"[base] {patt}: matches={len(matches)}")
         if required:
             if req_group:
+                # required_group members are OR'd against each other already
+                # (see the group-level check below) -- kept at pattern-level
+                # granularity even for a multi-select entry, since "satisfied
+                # if any alternative pattern matched anything" is the existing
+                # semantic and there's no current need to AND it against each
+                # selected value on top of that.
                 gs = req_group_state.setdefault(req_group, {"matched": False, "patterns": []})
                 gs["patterns"].append(patt)
                 if matches:
                     gs["matched"] = True
+            elif multi_tokens:
+                # Per-selected-value granularity: a required multi-select entry
+                # with e.g. ControlItemType=[Pot1, Pot2] where only Pot1 has a
+                # matching file must not be silently reported as "satisfied"
+                # just because *something* matched -- each unmatched selected
+                # value gets its own missing-required line.
+                for variant in unmatched_variants:
+                    detail = ", ".join(f"{t}={v}" for t, v in variant.items())
+                    req_missing.append(f"{patt} (no match for {detail})")
             elif not matches:
                 req_missing.append(patt)
         for m in matches:
