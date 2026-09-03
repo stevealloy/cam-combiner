@@ -49,6 +49,7 @@ state = {
     "file_exclude": {},         # step -> [filename, ...] manually removed from combined output (Outputs table X)
     "file_force_include": [],   # [filename, ...] manually forced into combined output regardless of rule/feature matching (Files panel +/X)
     "show_generated_files": False,  # opt-in: list ROOT-PASSTHROUGH-DIRS files individually in Files/Tools panels
+    "ignore_tool_conflicts": False,  # opt-in: proceed past a Tool number conflict fatal error during Generate Output
 }
 
 param_based_color = (255, 0, 0, 255)  # red
@@ -103,6 +104,10 @@ def _on_multi_param_toggle(sender, app_data, user_data):
 def _toggle_show_generated_files(sender, app_data):
     state["show_generated_files"] = app_data
     _refresh_ui(False)
+
+
+def _toggle_ignore_tool_conflicts(sender, app_data):
+    state["ignore_tool_conflicts"] = app_data
 
 
 def _toggle_feature(cid: str, value: bool, feature: CAMFeature):
@@ -1040,13 +1045,22 @@ def write_output_files():
 
     # Fatal error: two different tool descriptions both actively selected for the same tool number in
     # this run. tools.txt above is written first regardless, so it's there to debug from.
+    # "Ignore Tool Conflicts" (checkbox next to Generate Output) downgrades this to a logged warning
+    # and lets the run proceed -- the operator's own call that they'll handle the reload by hand.
     if active_conflicts:
-        raise RuntimeError(
-            "Tool number conflict -- the same tool slot is assigned to different tools, and both are "
-            "selected for output in this run (would require reloading the tool mid-project instead of "
-            "loading it once):\n" + format_tool_conflicts(active_conflicts) +
-            "\nSee tools.txt in the output directory for the full tool list."
-        )
+        if state.get("ignore_tool_conflicts"):
+            debug_print(
+                "[warn] Tool number conflict IGNORED (Ignore Tool Conflicts is checked) -- proceeding anyway:\n"
+                + format_tool_conflicts(active_conflicts)
+            )
+        else:
+            raise RuntimeError(
+                "Tool number conflict -- the same tool slot is assigned to different tools, and both are "
+                "selected for output in this run (would require reloading the tool mid-project instead of "
+                "loading it once):\n" + format_tool_conflicts(active_conflicts) +
+                "\nSee tools.txt in the output directory for the full tool list.\n"
+                "Check 'Ignore Tool Conflicts' next to Generate Output to proceed anyway."
+            )
 
     # create output files by step
     for out in outputs:
@@ -1646,6 +1660,8 @@ with dpg.window(label="CAM Combiner", width=2280, height=1200):
     dpg.add_separator()
     with dpg.group(horizontal=True, parent="Parameters"):
         dpg.add_button(label="Generate Output", tag="generate_output_btn", callback=generate_output)
+        dpg.add_checkbox(label="Ignore Tool Conflicts", default_value=state["ignore_tool_conflicts"],
+                         callback=_toggle_ignore_tool_conflicts)
         dpg.add_text("", tag="status_text", color=status_color)
 
     dpg.add_separator()
